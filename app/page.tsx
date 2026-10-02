@@ -148,8 +148,8 @@ export default function AdvancedDashboard() {
         </div>
 
         {isFlooded && !isAlertAcknowledged && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-red-950/65 p-4 backdrop-blur-sm" role="presentation">
-            <section role="alertdialog" aria-modal="true" aria-labelledby="flood-alert-title" aria-describedby="flood-alert-description" className="max-h-[calc(100dvh-2rem)] w-full max-w-2xl overflow-y-auto rounded-2xl border-2 border-red-300 bg-white text-slate-800 shadow-2xl">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-red-950/65 px-4 pb-4 pt-10 backdrop-blur-sm" role="presentation">
+            <section role="alertdialog" aria-modal="true" aria-labelledby="flood-alert-title" aria-describedby="flood-alert-description" className="max-h-[calc(100dvh-3.5rem)] w-full max-w-2xl overflow-y-auto rounded-2xl border-2 border-red-300 bg-white text-slate-800 shadow-2xl">
               <div className="bg-red-700 px-6 py-5 text-white sm:px-8">
                 <div className="flex items-start gap-4">
                   <div className="rounded-xl bg-white/15 p-3"><AlertCircle size={30} aria-hidden="true" /></div>
