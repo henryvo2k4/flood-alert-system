@@ -40,6 +40,7 @@ export default function AdvancedDashboard() {
   const [latestData, setLatestData] = useState<SensorData | null>(null);
   const [historyData, setHistoryData] = useState<SensorData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isAlertAcknowledged, setIsAlertAcknowledged] = useState(false);
 
   const formatTimestampLabel = (label: unknown) => {
     const raw = typeof label === "string" || typeof label === "number" || label instanceof Date
@@ -60,6 +61,7 @@ export default function AdvancedDashboard() {
     if (data && data.length > 0) {
       setLatestData(data[0]);
       setHistoryData(data);
+      if (data[0].water_level_cm < 10) setIsAlertAcknowledged(false);
     }
     setLoading(false);
   }, []);
@@ -75,16 +77,31 @@ export default function AdvancedDashboard() {
           const newData = payload.new as SensorData;
           setLatestData(newData);
           setHistoryData((current) => [newData, ...current].slice(0, 30));
+          if (newData.water_level_cm < 10) setIsAlertAcknowledged(false);
         }
       ).subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [fetchHistoryData]);
 
+  const isFlooded = latestData !== null && latestData.water_level_cm >= 10;
+
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-[#eef2f6] text-slate-500 font-semibold">Đang tải dữ liệu không gian...</div>;
   if (!latestData) return <div className="min-h-screen flex items-center justify-center bg-[#eef2f6] text-slate-500">Chưa có dữ liệu từ trạm.</div>;
 
-  const isFlooded = latestData.water_level_cm >= 10;
   const isStormy = latestData.wind_speed_ms > 15 && latestData.rain_status === 0;
+  const previousData = historyData[1];
+  const waterLevelChange = previousData ? latestData.water_level_cm - previousData.water_level_cm : null;
+  const sampleIntervalMs = previousData
+    ? new Date(latestData.created_at).getTime() - new Date(previousData.created_at).getTime()
+    : 0;
+  const waterLevelRate = waterLevelChange !== null && sampleIntervalMs > 0
+    ? waterLevelChange / (sampleIntervalMs / 3_600_000)
+    : null;
+  const trendDescription = waterLevelChange === null || sampleIntervalMs <= 0
+    ? "Chưa đủ dữ liệu hợp lệ để xác định xu hướng mực nước."
+    : Math.abs(waterLevelChange) < 0.2
+      ? `Mực nước gần như ổn định giữa hai lần đo gần nhất (${waterLevelChange >= 0 ? "+" : ""}${waterLevelChange.toFixed(1)} cm).`
+      : `Mực nước ${waterLevelChange > 0 ? "đang tăng" : "đang giảm"} ${Math.abs(waterLevelChange).toFixed(1)} cm giữa hai lần đo gần nhất${waterLevelRate !== null ? ` (tốc độ đo được khoảng ${waterLevelRate > 0 ? "+" : ""}${waterLevelRate.toFixed(1)} cm/giờ)` : ""}.`;
 
   // Xử lý dữ liệu cho Biểu đồ Radar (Tính theo % mức độ cực đoan)
   const radarData = [
@@ -96,25 +113,95 @@ export default function AdvancedDashboard() {
   ];
 
   return (
-    <div className="min-h-screen bg-[#eef2f6] text-slate-700 font-sans p-6 md:p-10">
+    <div className={`min-h-screen bg-[#eef2f6] p-6 font-sans text-slate-700 md:p-10 ${isFlooded ? "flood-alert-active" : ""}`}>
+      {isFlooded && (
+        <div role="alert" aria-live="assertive" className="mx-auto mb-6 flex max-w-7xl flex-col items-start justify-between gap-3 rounded-xl border border-red-300 bg-red-700 px-5 py-4 text-white shadow-lg sm:flex-row sm:items-center">
+          <div className="flex items-start gap-3">
+            <AlertCircle size={24} className="mt-0.5 shrink-0" />
+            <div>
+              <p className="font-black uppercase">Cảnh báo nghiêm trọng: mực nước vượt ngưỡng</p>
+              <p className="mt-1 text-sm text-red-50">Đang ghi nhận {latestData.water_level_cm.toFixed(1)} cm; ngưỡng cảnh báo của hệ thống là 10 cm.</p>
+            </div>
+          </div>
+          <button type="button" onClick={() => setIsAlertAcknowledged(false)} className="shrink-0 rounded-lg bg-white px-4 py-2 text-sm font-bold text-red-800 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">
+            Xem chi tiết cảnh báo
+          </button>
+        </div>
+      )}
       <div className="max-w-7xl mx-auto space-y-8">
         
         {/* HEADER */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 mb-10">
-          <div>
-            <h1 className="text-3xl font-black text-slate-800 tracking-tight flex items-center gap-3 mb-2">
+        <div className="mb-10 flex flex-col items-center gap-4 text-center">
+          <div className="flex flex-col items-center">
+            <h1 className="mb-2 flex items-center justify-center gap-3 text-3xl font-black tracking-tight text-slate-800">
               <div className="p-2.5 bg-blue-500/10 text-blue-600 rounded-xl shadow-inner"><Activity size={28} /></div>
-              OPERATIONS COMMAND & ANALYTICS
+              FLOOD ALERT SYSTEM
             </h1>
-            <p className="text-slate-500 text-sm ml-14 font-medium">Environmental Node • Real-time Monitoring & Flood Audit Hub</p>
+            <p className="text-sm font-medium text-slate-500">Real-time flood monitoring and alert system</p>
           </div>
           
-          <div className={`px-6 py-3 text-sm font-bold flex items-center gap-3 ${neuCard} rounded-full! py-2.5! 
+          <div className={`flex items-center gap-3 px-6 py-3 text-sm font-bold ${neuCard} rounded-full! py-2.5!
             ${isFlooded ? "text-red-600 border-red-200" : isStormy ? "text-orange-600" : "text-emerald-600"}`}>
             <div className={`w-2.5 h-2.5 rounded-full ${isFlooded ? "bg-red-500 animate-ping" : isStormy ? "bg-orange-500" : "bg-emerald-500"}`}></div>
             {isFlooded ? "CRITICAL: FLOOD DETECTED" : isStormy ? "WARNING: STORM CONDITIONS" : "SYSTEM STABLE"}
           </div>
         </div>
+
+        {isFlooded && !isAlertAcknowledged && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-red-950/65 p-4 backdrop-blur-sm" role="presentation">
+            <section role="alertdialog" aria-modal="true" aria-labelledby="flood-alert-title" aria-describedby="flood-alert-description" className="max-h-[calc(100dvh-2rem)] w-full max-w-2xl overflow-y-auto rounded-2xl border-2 border-red-300 bg-white text-slate-800 shadow-2xl">
+              <div className="bg-red-700 px-6 py-5 text-white sm:px-8">
+                <div className="flex items-start gap-4">
+                  <div className="rounded-xl bg-white/15 p-3"><AlertCircle size={30} aria-hidden="true" /></div>
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-widest text-red-100">Cảnh báo khẩn cấp • Trạm quan trắc</p>
+                    <h2 id="flood-alert-title" className="mt-1 text-2xl font-black">Nguy cơ ngập lụt nghiêm trọng</h2>
+                    <p id="flood-alert-description" className="mt-2 text-sm text-red-50">Mực nước đã chạm/vượt ngưỡng cảnh báo được cấu hình. Hãy ưu tiên an toàn cá nhân và kiểm tra các chỉ số dưới đây.</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-6 p-6 sm:p-8">
+                <section aria-labelledby="flood-readings-title">
+                  <h3 id="flood-readings-title" className="text-sm font-black uppercase tracking-wide text-slate-500">Thông số mới nhất</h3>
+                  <dl className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    <AlertReading label="Mực nước" value={`${latestData.water_level_cm.toFixed(1)} cm`} critical />
+                    <AlertReading label="Mưa" value={latestData.rain_status === 0 ? "Đang mưa" : "Không ghi nhận mưa"} />
+                    <AlertReading label="Sức gió" value={`${latestData.wind_speed_ms.toFixed(1)} m/s`} />
+                    <AlertReading label="Nhiệt độ" value={`${latestData.temperature.toFixed(1)} °C`} />
+                    <AlertReading label="Độ ẩm" value={`${latestData.humidity.toFixed(0)}%`} />
+                    <AlertReading label="Áp suất" value={`${latestData.pressure.toFixed(0)} hPa`} />
+                    <AlertReading label="Ánh sáng" value={`${latestData.light_lux.toFixed(0)} lux`} />
+                    <AlertReading label="Ngưỡng hệ thống" value="10 cm" />
+                    <AlertReading label="Thời điểm đo" value={new Date(latestData.created_at).toLocaleString("vi-VN")} />
+                  </dl>
+                </section>
+
+                <section className="rounded-xl border border-amber-300 bg-amber-50 p-4" aria-labelledby="flood-trend-title">
+                  <h3 id="flood-trend-title" className="font-bold text-amber-950">Xu hướng quan sát, không phải dự báo</h3>
+                  <p className="mt-1 text-sm leading-6 text-amber-900">{trendDescription}</p>
+                  <p className="mt-2 text-xs leading-5 text-amber-800">Ước tính chỉ dựa trên hai bản ghi cảm biến gần nhất; không thay thế dự báo thủy văn hoặc hướng dẫn của cơ quan chức năng.</p>
+                </section>
+
+                <section aria-labelledby="flood-actions-title">
+                  <h3 id="flood-actions-title" className="text-sm font-black uppercase tracking-wide text-slate-500">Hướng xử lý an toàn</h3>
+                  <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm leading-6 text-slate-700 marker:font-bold marker:text-red-700">
+                    <li>Rời khu vực thấp trũng nếu nước tiếp tục dâng; di chuyển đến nơi cao, kiên cố và đi theo hướng dẫn sơ tán tại địa phương.</li>
+                    <li>Không đi bộ, đi xe qua dòng nước ngập; tránh xa cống/rãnh, dây điện rơi và thiết bị điện bị ướt.</li>
+                    <li>Đưa trẻ em, người cao tuổi và người cần hỗ trợ đến nơi an toàn; mang theo điện thoại, thuốc thiết yếu và giấy tờ quan trọng nếu có thời gian.</li>
+                    <li>Theo dõi thông báo chính thức và liên hệ lực lượng cứu hộ/cơ quan khẩn cấp địa phương khi có nguy hiểm tức thời.</li>
+                  </ol>
+                </section>
+
+                <div className="flex flex-col-reverse gap-3 border-t border-slate-200 pt-5 sm:flex-row sm:justify-end">
+                  <button type="button" onClick={() => setIsAlertAcknowledged(true)} className="rounded-lg bg-red-700 px-5 py-3 text-sm font-bold text-white hover:bg-red-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700">
+                    Đã xem, tiếp tục theo dõi
+                  </button>
+                </div>
+              </div>
+            </section>
+          </div>
+        )}
 
         {/* METRICS GRID */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6">
@@ -232,6 +319,15 @@ export default function AdvancedDashboard() {
         </div>
 
       </div>
+    </div>
+  );
+}
+
+function AlertReading({ label, value, critical = false }: { label: string; value: string; critical?: boolean }) {
+  return (
+    <div className={`min-w-0 rounded-lg border p-3 ${critical ? "border-red-300 bg-red-50" : "border-slate-200 bg-slate-50"}`}>
+      <dt className="text-xs font-semibold text-slate-500">{label}</dt>
+      <dd className={`mt-1 break-words text-sm font-black ${critical ? "text-red-700" : "text-slate-800"}`}>{value}</dd>
     </div>
   );
 }
