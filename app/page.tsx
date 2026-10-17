@@ -437,7 +437,7 @@ export default function AdvancedDashboard() {
               title="Mở bảng tùy chỉnh thông số"
             >
               <Settings size={16} className={hasAnyOverride ? "text-amber-500" : "text-slate-600"} />
-              <span>Tùy chỉnh thông số</span>
+              <span></span>
               {hasAnyOverride && (
                 <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-black leading-none">
                   {overrideCount}
@@ -626,7 +626,7 @@ export default function AdvancedDashboard() {
           title="Tùy chỉnh thông số hệ thống"
         >
           <Settings size={22} className="group-hover:rotate-90 transition-transform duration-300" />
-          <span className="text-xs font-bold tracking-wide">Tùy chỉnh thông số</span>
+          <span className="text-xs font-bold tracking-wide"></span>
           {hasAnyOverride && (
             <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-400 text-slate-900 text-[10px] font-black shadow">
               {overrideCount}
