@@ -8,7 +8,7 @@ import {
   ComposedChart, Bar, Area, Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis
 } from "recharts";
 import { 
-  Droplets, Wind, Thermometer, CloudRain, Activity, AlertCircle, MapPin
+  Droplets, Wind, Thermometer, CloudRain, Activity, AlertCircle, MapPin, SlidersHorizontal
 } from "lucide-react";
 
 // Tải Component bản đồ động (Bỏ qua SSR)
@@ -42,6 +42,12 @@ export default function AdvancedDashboard() {
   const [loading, setLoading] = useState(true);
   const [isAlertAcknowledged, setIsAlertAcknowledged] = useState(false);
 
+  // States cho tính năng mô phỏng / điều chỉnh độ lụt thủ công
+  const [manualInput, setManualInput] = useState<string>("");
+  const [isSubmittingManual, setIsSubmittingManual] = useState<boolean>(false);
+  const [currentManualTarget, setCurrentManualTarget] = useState<number | null>(null);
+  const [manualStatusMsg, setManualStatusMsg] = useState<string>("");
+
   const formatTimestampLabel = (label: unknown) => {
     const raw = typeof label === "string" || typeof label === "number" || label instanceof Date
       ? label
@@ -51,18 +57,36 @@ export default function AdvancedDashboard() {
   };
 
   const fetchHistoryData = useCallback(async () => {
+    // 1. Lấy dữ liệu quan trắc thực tế từ trạm (bỏ qua bản ghi lệnh có rain_status = -99)
     const { data } = await supabase
       .from("sensor_logs")
       .select("*")
       .eq("station_id", STATION_ID)
+      .neq("rain_status", -99)
       .order("created_at", { ascending: false })
       .limit(30);
 
     if (data && data.length > 0) {
       setLatestData(data[0]);
       setHistoryData(data);
-      if (data[0].water_level_cm < 10) setIsAlertAcknowledged(false);
+      if (data[0].water_level_cm < 20) setIsAlertAcknowledged(false);
     }
+
+    // 2. Lấy mức độ lụt thủ công gần nhất đã được cấu hình từ Web
+    const { data: manualData } = await supabase
+      .from("sensor_logs")
+      .select("water_level_cm")
+      .eq("station_id", STATION_ID)
+      .eq("rain_status", -99)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (manualData && manualData.length > 0) {
+      const target = manualData[0].water_level_cm;
+      setCurrentManualTarget(target);
+      setManualInput(target.toString());
+    }
+
     setLoading(false);
   }, []);
 
@@ -75,15 +99,82 @@ export default function AdvancedDashboard() {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'sensor_logs', filter: `station_id=eq.${STATION_ID}` },
         (payload) => {
           const newData = payload.new as SensorData;
+          // Nếu là bản ghi lệnh điều khiển thủ công từ Web
+          if (newData.rain_status === -99) {
+            setCurrentManualTarget(newData.water_level_cm);
+            setManualInput(newData.water_level_cm.toString());
+            return;
+          }
+          // Bản ghi dữ liệu quan trắc gửi từ thiết bị
           setLatestData(newData);
-          setHistoryData((current) => [newData, ...current].slice(0, 30));
-          if (newData.water_level_cm < 10) setIsAlertAcknowledged(false);
+          setHistoryData((current) => [newData, ...current.filter(item => item.rain_status !== -99)].slice(0, 30));
+          if (newData.water_level_cm < 20) setIsAlertAcknowledged(false);
         }
       ).subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [fetchHistoryData]);
 
-  const isFlooded = latestData !== null && latestData.water_level_cm >= 10;
+  // Giữ số hiển thị trên Web nhảy nhẹ quanh mức lụt mục tiêu (±0.1 đến ±0.2 cm) tạo hiệu ứng nước dập dềnh
+  useEffect(() => {
+    if (currentManualTarget === null) return;
+    const interval = setInterval(() => {
+      setLatestData((prev) => {
+        if (!prev) return prev;
+        // Rung nhẹ ngẫu nhiên quanh mức cơ sở
+        const jitter = Math.round((Math.random() * 0.4 - 0.2) * 10) / 10;
+        const newLevel = Math.max(0, Math.min(100, Number((currentManualTarget + jitter).toFixed(1))));
+        return {
+          ...prev,
+          water_level_cm: newLevel
+        };
+      });
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [currentManualTarget]);
+
+  // Hàm gửi mức độ lụt thủ công xuống hệ thống (Supabase & Hardware)
+  const handleSetManualFlood = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const val = parseFloat(manualInput);
+    if (isNaN(val) || val < 0 || val > 100) {
+      setManualStatusMsg("Vui lòng nhập độ lụt hợp lệ từ 0 đến 100 cm!");
+      return;
+    }
+
+    setIsSubmittingManual(true);
+    setManualStatusMsg("Đang đồng bộ xuống trạm...");
+
+    try {
+      setCurrentManualTarget(val);
+      setLatestData((prev) => prev ? { ...prev, water_level_cm: val } : null);
+
+      // Gửi bản ghi lệnh có rain_status = -99 để thiết bị ESP32 nhận biết ngay lập tức
+      const { error } = await supabase.from("sensor_logs").insert([{
+        station_id: STATION_ID,
+        water_level_cm: val,
+        rain_status: -99,
+        temperature: -999,
+        humidity: 0,
+        pressure: 0,
+        light_lux: 0,
+        wind_speed_ms: 0
+      }]);
+
+      if (error) {
+        setManualStatusMsg("Lỗi gửi dữ liệu: " + error.message);
+      } else {
+        setManualStatusMsg(`Đã đồng bộ độ lụt ${val.toFixed(1)} cm! Màn hình & Web đang hiển thị.`);
+        setTimeout(() => setManualStatusMsg(""), 4000);
+      }
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      setManualStatusMsg("Lỗi: " + errorMsg);
+    } finally {
+      setIsSubmittingManual(false);
+    }
+  };
+
+  const isFlooded = latestData !== null && latestData.water_level_cm >= 20;
 
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-[#eef2f6] text-slate-500 font-semibold">Đang tải dữ liệu không gian...</div>;
   if (!latestData) return <div className="min-h-screen flex items-center justify-center bg-[#eef2f6] text-slate-500">Chưa có dữ liệu từ trạm.</div>;
@@ -103,9 +194,21 @@ export default function AdvancedDashboard() {
       ? `Mực nước gần như ổn định giữa hai lần đo gần nhất (${waterLevelChange >= 0 ? "+" : ""}${waterLevelChange.toFixed(1)} cm).`
       : `Mực nước ${waterLevelChange > 0 ? "đang tăng" : "đang giảm"} ${Math.abs(waterLevelChange).toFixed(1)} cm giữa hai lần đo gần nhất${waterLevelRate !== null ? ` (tốc độ đo được khoảng ${waterLevelRate > 0 ? "+" : ""}${waterLevelRate.toFixed(1)} cm/giờ)` : ""}.`;
 
+  // Phân cấp mức độ ngập:
+  // - Độ lụt nhỏ hơn 20: Không có cảnh báo
+  // - Độ lụt từ 20 tới 50: Cảnh báo lụt nhẹ
+  // - Độ lụt từ 50 trở lên: Cảnh báo lụt nặng
+  const floodTier = latestData === null ? 0 :
+    latestData.water_level_cm >= 50 ? 2 :
+    latestData.water_level_cm >= 20 ? 1 : 0;
+
+  const floodTierTitle = 
+    floodTier === 2 ? "NGUY HIỂM: CẢNH BÁO LỤT NẶNG (≥ 50 cm)" :
+    floodTier === 1 ? "CẢNH BÁO: LỤT NHẸ (20 - 50 cm)" : "AN TOÀN / KHÔNG CẢNH BÁO";
+
   // Xử lý dữ liệu cho Biểu đồ Radar (Tính theo % mức độ cực đoan)
   const radarData = [
-    { subject: 'Ngập lụt', A: Math.min((latestData.water_level_cm / 20) * 100, 100), fullMark: 100 },
+    { subject: 'Ngập lụt', A: Math.min((latestData.water_level_cm / 50) * 100, 100), fullMark: 100 },
     { subject: 'Nhiệt độ', A: Math.min((latestData.temperature / 50) * 100, 100), fullMark: 100 },
     { subject: 'Sức gió', A: Math.min((latestData.wind_speed_ms / 30) * 100, 100), fullMark: 100 },
     { subject: 'Độ ẩm', A: latestData.humidity, fullMark: 100 },
@@ -119,8 +222,8 @@ export default function AdvancedDashboard() {
           <div className="flex items-start gap-3">
             <AlertCircle size={24} className="mt-0.5 shrink-0" />
             <div>
-              <p className="font-black uppercase">Cảnh báo nghiêm trọng: mực nước vượt ngưỡng</p>
-              <p className="mt-1 text-sm text-red-50">Đang ghi nhận {latestData.water_level_cm.toFixed(1)} cm; ngưỡng cảnh báo của hệ thống là 10 cm.</p>
+              <p className="font-black uppercase">{floodTierTitle}</p>
+              <p className="mt-1 text-sm text-red-50">Đang ghi nhận {latestData.water_level_cm.toFixed(1)} cm; ngưỡng cảnh báo ngập của hệ thống là 20 cm.</p>
             </div>
           </div>
           <button type="button" onClick={() => setIsAlertAcknowledged(false)} className="shrink-0 rounded-lg bg-white px-4 py-2 text-sm font-bold text-red-800 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">
@@ -143,7 +246,7 @@ export default function AdvancedDashboard() {
           <div className={`flex items-center gap-3 px-6 py-3 text-sm font-bold ${neuCard} rounded-full! py-2.5!
             ${isFlooded ? "text-red-600 border-red-200" : isStormy ? "text-orange-600" : "text-emerald-600"}`}>
             <div className={`w-2.5 h-2.5 rounded-full ${isFlooded ? "bg-red-500 animate-ping" : isStormy ? "bg-orange-500" : "bg-emerald-500"}`}></div>
-            {isFlooded ? "CRITICAL: FLOOD DETECTED" : isStormy ? "WARNING: STORM CONDITIONS" : "SYSTEM STABLE"}
+            {isFlooded ? floodTierTitle : isStormy ? "WARNING: STORM CONDITIONS" : "SYSTEM STABLE"}
           </div>
         </div>
 
@@ -172,7 +275,7 @@ export default function AdvancedDashboard() {
                     <AlertReading label="Độ ẩm" value={`${latestData.humidity.toFixed(0)}%`} />
                     <AlertReading label="Áp suất" value={`${latestData.pressure.toFixed(0)} hPa`} />
                     <AlertReading label="Ánh sáng" value={`${latestData.light_lux.toFixed(0)} lux`} />
-                    <AlertReading label="Ngưỡng hệ thống" value="10 cm" />
+                    <AlertReading label="Ngưỡng hệ thống" value="20 cm" />
                     <AlertReading label="Thời điểm đo" value={new Date(latestData.created_at).toLocaleString("vi-VN")} />
                   </dl>
                 </section>
@@ -248,7 +351,7 @@ export default function AdvancedDashboard() {
             </div>
             <div className="flex-1 overflow-y-auto pr-2 space-y-4">
               {historyData.slice(0, 6).map((log, idx) => {
-                const isFloodLog = log.water_level_cm >= 10;
+                const isFloodLog = log.water_level_cm >= 20;
                 return (
                   <div key={idx} className="flex gap-4 items-start relative before:absolute before:left-3 before:top-8 before:-bottom-4 before:w-0.5 before:bg-slate-200 last:before:hidden">
                     <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 z-10 ${isFloodLog ? "bg-red-100 text-red-600" : "bg-blue-100 text-blue-600"}`}>
@@ -317,6 +420,51 @@ export default function AdvancedDashboard() {
             <MapNode isFlooded={isFlooded} isStormy={isStormy} />
           </div>
         </div>
+
+        {/* Ô ĐIỀU CHỈNH / MÔ PHỎNG ĐỘ LỤT (KHI CẢM BIẾN LỖI - ĐỒNG BỘ REALTIME CẢ WEB VÀ MÀN HÌNH) */}
+        <div className={`${neuCard} flex flex-col md:flex-row items-center justify-between gap-4 border border-blue-200/60 bg-gradient-to-r from-blue-50/50 via-[#f4f7fb] to-indigo-50/50`}>
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-600 shadow-inner">
+              <SlidersHorizontal size={22} />
+            </div>
+            <div>
+              <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">
+                Mô phỏng độ lụt (Đồng bộ Realtime xuống màn hình & web)
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Cảm biến siêu âm gặp sự cố — Nhập độ lụt (0 - 100 cm) để hệ thống tự động nhảy nhẹ quanh mức này và đồng bộ thời gian thực.
+              </p>
+            </div>
+          </div>
+
+          <form onSubmit={handleSetManualFlood} className="flex items-center gap-2 w-full md:w-auto">
+            <div className="relative flex-1 md:w-44">
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                max="100"
+                value={manualInput}
+                onChange={(e) => setManualInput(e.target.value)}
+                placeholder="Độ lụt (cm)"
+                className="w-full px-3.5 py-2 text-sm font-bold bg-white rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner text-slate-800"
+              />
+              <span className="absolute right-3 top-2 text-xs font-bold text-slate-400">cm</span>
+            </div>
+            <button
+              type="submit"
+              disabled={isSubmittingManual}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-sm font-bold rounded-xl shadow-md transition-all duration-150 disabled:opacity-50 shrink-0 cursor-pointer"
+            >
+              {isSubmittingManual ? "Đang gửi..." : "Áp dụng"}
+            </button>
+          </form>
+        </div>
+        {manualStatusMsg && (
+          <p className="text-xs font-semibold text-center text-blue-600 -mt-4">
+            {manualStatusMsg}
+          </p>
+        )}
 
       </div>
     </div>

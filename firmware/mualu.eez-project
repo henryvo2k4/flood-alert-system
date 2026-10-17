@@ -1,0 +1,218 @@
+{
+  "eezVersion": "0.13.0",
+  "settings": {
+    "general": {
+      "projectType": "lvgl",
+      "projectVersion": "v3",
+      "flowSupport": false
+    },
+    "display": {
+      "width": 320,
+      "height": 240
+    },
+    "lvgl": {
+      "version": "8.3",
+      "colorDepth": 16
+    }
+  },
+  "bitmaps": [
+    {
+      "name": "nen_img",
+      "file": "nen_320x240.png"
+    }
+  ],
+  "pages": [
+    {
+      "name": "Screen1",
+      "description": "Main Dashboard",
+      "width": 320,
+      "height": 240,
+      "widgets": [
+        {
+          "type": "Image",
+          "name": "img_bg",
+          "x": 0,
+          "y": 0,
+          "width": 320,
+          "height": 240,
+          "image": "nen_img"
+        },
+        {
+          "type": "Container",
+          "name": "card_temp",
+          "x": 9,
+          "y": 11,
+          "width": 96,
+          "height": 62,
+          "widgets": [
+            {
+              "type": "Label",
+              "name": "lbl_temp_title",
+              "x": 10,
+              "y": 4,
+              "text": "NHIET DO"
+            },
+            {
+              "type": "Label",
+              "name": "lbl_temp_val",
+              "x": 10,
+              "y": 28,
+              "text": "31.5 °C"
+            }
+          ]
+        },
+        {
+          "type": "Container",
+          "name": "card_hum",
+          "x": 110,
+          "y": 11,
+          "width": 98,
+          "height": 62,
+          "widgets": [
+            {
+              "type": "Label",
+              "name": "lbl_hum_title",
+              "x": 20,
+              "y": 4,
+              "text": "DO AM"
+            },
+            {
+              "type": "Label",
+              "name": "lbl_hum_val",
+              "x": 20,
+              "y": 28,
+              "text": "78 %"
+            }
+          ]
+        },
+        {
+          "type": "Container",
+          "name": "card_wind",
+          "x": 215,
+          "y": 11,
+          "width": 96,
+          "height": 62,
+          "widgets": [
+            {
+              "type": "Label",
+              "name": "lbl_wind_title",
+              "x": 15,
+              "y": 4,
+              "text": "SUC GIO"
+            },
+            {
+              "type": "Label",
+              "name": "lbl_wind_val",
+              "x": 15,
+              "y": 28,
+              "text": "3.5 m/s"
+            }
+          ]
+        },
+        {
+          "type": "Container",
+          "name": "card_press",
+          "x": 9,
+          "y": 78,
+          "width": 96,
+          "height": 62,
+          "widgets": [
+            {
+              "type": "Label",
+              "name": "lbl_press_title",
+              "x": 15,
+              "y": 4,
+              "text": "AP SUAT"
+            },
+            {
+              "type": "Label",
+              "name": "lbl_press_val",
+              "x": 10,
+              "y": 28,
+              "text": "1008 hPa"
+            }
+          ]
+        },
+        {
+          "type": "Container",
+          "name": "card_water",
+          "x": 110,
+          "y": 78,
+          "width": 98,
+          "height": 62,
+          "widgets": [
+            {
+              "type": "Label",
+              "name": "lbl_water_title",
+              "x": 15,
+              "y": 4,
+              "text": "MUC NGAP"
+            },
+            {
+              "type": "Label",
+              "name": "lbl_water_val",
+              "x": 15,
+              "y": 28,
+              "text": "0.0 cm"
+            }
+          ]
+        },
+        {
+          "type": "Container",
+          "name": "card_weather",
+          "x": 215,
+          "y": 78,
+          "width": 96,
+          "height": 62,
+          "widgets": [
+            {
+              "type": "Label",
+              "name": "lbl_weather_title",
+              "x": 15,
+              "y": 4,
+              "text": "THOI TIET"
+            },
+            {
+              "type": "Label",
+              "name": "lbl_weather_val",
+              "x": 10,
+              "y": 24,
+              "text": "NANG DEP"
+            },
+            {
+              "type": "Label",
+              "name": "lbl_weather_sub",
+              "x": 15,
+              "y": 42,
+              "text": "15000 lx"
+            }
+          ]
+        },
+        {
+          "type": "Container",
+          "name": "card_status",
+          "x": 9,
+          "y": 145,
+          "width": 302,
+          "height": 79,
+          "widgets": [
+            {
+              "type": "Label",
+              "name": "lbl_status_main",
+              "x": 10,
+              "y": 6,
+              "text": "HE THONG HOAT DONG ON DINH"
+            },
+            {
+              "type": "Label",
+              "name": "lbl_status_sub",
+              "x": 10,
+              "y": 36,
+              "text": "Cac chi so moi truong trong gioi han an toan."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
