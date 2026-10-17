@@ -81,13 +81,13 @@ export default function AdvancedDashboard() {
       .order("created_at", { ascending: false })
       .limit(1);
 
-    if (manualData && manualData.length > 0) {
+    if (manualData && manualData.length > 0 && manualData[0].water_level_cm >= 0) {
       const target = manualData[0].water_level_cm;
       setCurrentManualTarget(target);
       setManualInput(target.toString());
     } else {
-      setCurrentManualTarget(0);
-      setManualInput("0");
+      setCurrentManualTarget(null);
+      setManualInput("");
     }
 
     setLoading(false);
@@ -104,8 +104,13 @@ export default function AdvancedDashboard() {
           const newData = payload.new as SensorData;
           // Nếu là bản ghi lệnh điều khiển thủ công từ Web
           if (newData.rain_status === -99) {
-            setCurrentManualTarget(newData.water_level_cm);
-            setManualInput(newData.water_level_cm.toString());
+            if (newData.water_level_cm >= 0) {
+              setCurrentManualTarget(newData.water_level_cm);
+              setManualInput(newData.water_level_cm.toString());
+            } else {
+              setCurrentManualTarget(null);
+              setManualInput("");
+            }
             return;
           }
           // Bản ghi dữ liệu quan trắc gửi từ thiết bị
@@ -117,9 +122,9 @@ export default function AdvancedDashboard() {
     return () => { supabase.removeChannel(channel); };
   }, [fetchHistoryData]);
 
-  // Giữ số hiển thị trên Web nhảy nhẹ quanh mức lụt mục tiêu (±0.1 đến ±0.3 cm) tạo hiệu ứng nước dập dềnh mỗi 1 giây
+  // Giữ số hiển thị trên Web nhảy nhẹ quanh mức lụt mục tiêu (±0.1 đến ±0.3 cm) khi đang ở chế độ Theo Web
   useEffect(() => {
-    if (currentManualTarget === null) return;
+    if (currentManualTarget === null || currentManualTarget < 0) return;
     const interval = setInterval(() => {
       setLatestData((prev) => {
         if (!prev) return prev;
@@ -166,7 +171,42 @@ export default function AdvancedDashboard() {
       if (error) {
         setManualStatusMsg("Lỗi gửi dữ liệu: " + error.message);
       } else {
-        setManualStatusMsg(`Đã đồng bộ độ lụt ${val.toFixed(1)} cm! Màn hình & Web đang hiển thị.`);
+        setManualStatusMsg(`Đã kích hoạt chế độ Theo Web: ${val.toFixed(1)} cm!`);
+        setTimeout(() => setManualStatusMsg(""), 4000);
+      }
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      setManualStatusMsg("Lỗi: " + errorMsg);
+    } finally {
+      setIsSubmittingManual(false);
+    }
+  };
+
+  // Hàm chuyển về chế độ cảm biến tự đo (bỏ đè theo Web)
+  const handleResetToAuto = async () => {
+    setIsSubmittingManual(true);
+    setManualStatusMsg("Đang chuyển về chế độ cảm biến tự đo...");
+
+    try {
+      setCurrentManualTarget(null);
+      setManualInput("");
+
+      // Gửi bản ghi lệnh có water_level_cm = -1 để ESP32 chuyển sang đọc cảm biến siêu âm tự đo
+      const { error } = await supabase.from("sensor_logs").insert([{
+        station_id: STATION_ID,
+        water_level_cm: -1,
+        rain_status: -99,
+        temperature: -999,
+        humidity: 0,
+        pressure: 0,
+        light_lux: 0,
+        wind_speed_ms: 0
+      }]);
+
+      if (error) {
+        setManualStatusMsg("Lỗi: " + error.message);
+      } else {
+        setManualStatusMsg("Đã chuyển về chế độ cảm biến tự đo! Màn hình & Web đang nhận dữ liệu từ cảm biến.");
         setTimeout(() => setManualStatusMsg(""), 4000);
       }
     } catch (err: unknown) {
@@ -424,24 +464,29 @@ export default function AdvancedDashboard() {
           </div>
         </div>
 
-        {/* Ô ĐIỀU CHỈNH / MÔ PHỎNG ĐỘ LỤT (CHẠY 100% SỐ TRÊN WEB - ĐỒNG BỘ REALTIME 1S CẢ WEB VÀ MÀN HÌNH) */}
+        {/* Ô ĐIỀU CHỈNH / ĐÈ ĐỘ LỤT (TỰ ĐO BẰNG CẢM BIẾN, KHI NHẬP TRÊN WEB THÌ THEO WEB) */}
         <div className={`${neuCard} flex flex-col md:flex-row items-center justify-between gap-4 border border-blue-200/60 bg-gradient-to-r from-blue-50/50 via-[#f4f7fb] to-indigo-50/50`}>
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-600 shadow-inner">
               <SlidersHorizontal size={22} />
             </div>
             <div>
-              <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">
-                Cài đặt độ lụt (Đồng bộ Realtime 1s cả Web và Màn hình)
-              </h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">
+                  Điều khiển độ lụt
+                </h3>
+                <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${currentManualTarget !== null ? "bg-amber-100 text-amber-700 border border-amber-300" : "bg-emerald-100 text-emerald-700 border border-emerald-300"}`}>
+                  {currentManualTarget !== null ? `Đang theo Web: ${currentManualTarget.toFixed(1)} cm` : "Đang cảm biến tự đo"}
+                </span>
+              </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                Chạy hoàn toàn bằng số trên Web — Nhập độ lụt (0 - 100 cm), hệ thống sẽ tự động dao động nhẹ ±0.x cm và đồng bộ tức thì mỗi 1 giây.
+                Mặc định hệ thống tự đo bằng cảm biến siêu âm. Lúc nào nhập số vào ô bên cạnh thì màn hình & Web sẽ chạy theo số Web.
               </p>
             </div>
           </div>
 
           <form onSubmit={handleSetManualFlood} className="flex items-center gap-2 w-full md:w-auto">
-            <div className="relative flex-1 md:w-44">
+            <div className="relative flex-1 md:w-36">
               <input
                 type="number"
                 step="0.1"
@@ -459,8 +504,18 @@ export default function AdvancedDashboard() {
               disabled={isSubmittingManual}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-sm font-bold rounded-xl shadow-md transition-all duration-150 disabled:opacity-50 shrink-0 cursor-pointer"
             >
-              {isSubmittingManual ? "Đang gửi..." : "Áp dụng"}
+              {isSubmittingManual ? "..." : "Theo Web"}
             </button>
+            {currentManualTarget !== null && (
+              <button
+                type="button"
+                onClick={handleResetToAuto}
+                disabled={isSubmittingManual}
+                className="px-3.5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm font-bold rounded-xl shadow transition-all duration-150 disabled:opacity-50 shrink-0 cursor-pointer"
+              >
+                Về tự đo
+              </button>
+            )}
           </form>
         </div>
         {manualStatusMsg && (

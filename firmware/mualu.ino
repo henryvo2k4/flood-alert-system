@@ -29,6 +29,8 @@ const char* STATION_ID        = "c518805a-efa1-4a0b-a4e9-e45b3cc993ef";
 // ================= CẤU HÌNH CHÂN PHẦN CỨNG =================
 #define RAIN_DO   32
 #define RAIN_AO   33
+#define TRIG_PIN  5
+#define ECHO_PIN  19
 #define WIND_PIN  34 
 
 // Chiều cao đặt cảm biến mặc định (100 cm = 1 mét)
@@ -61,13 +63,19 @@ bool isConfigPortalActive = false;
 unsigned long prevSensorReadTime = 0;
 const unsigned long INTERVAL_SENSOR_READ = 1000; // Đọc cảm biến và refresh LVGL mỗi 1s
 
-// Độ lụt chạy hoàn toàn bằng số trên Web (mặc định 0.0 cm nếu chưa có cấu hình)
-float manualTargetWaterLevel = 0.0f;
+// Chế độ đo độ lụt:
+// manualTargetWaterLevel >= 0.0f : Chế độ THEO SỐ TRÊN WEB (khi người dùng nhập trên web)
+// manualTargetWaterLevel < 0.0f  : Chế độ TỰ ĐỘNG ĐO (đọc cảm biến siêu âm JSN-SR04T)
+float manualTargetWaterLevel = -1.0f; // Mặc định khởi động ở chế độ tự đo
 unsigned long prevTargetFetchTime = 0;
-const unsigned long INTERVAL_TARGET_FETCH = 1000; // Lấy lệnh độ lụt từ Web mỗi 1s
+const unsigned long INTERVAL_TARGET_FETCH = 1000; // Kiểm tra lệnh từ Web mỗi 1s
 
 unsigned long prevSupabasePostTime = 0;
 const unsigned long INTERVAL_SUPABASE_POST = 1000; // Gửi dữ liệu lên Supabase mỗi 1s
+
+// Bộ lọc mượt cho cảm biến tự đo
+float smoothedWaterLevel = 0.0;
+bool waterLevelInitialized = false;
 
 // Phân cấp mức ngập: Cấp 0: Không cảnh báo (<20cm), Cấp 1: Cảnh báo lụt nhẹ (20-50cm), Cấp 2: Cảnh báo lụt nặng (>=50cm)
 int confirmedFloodLevel = 0;
@@ -307,6 +315,46 @@ bool attemptConnectWiFi() {
     return false;
 }
 
+// Hàm đo khoảng cách cảm biến siêu âm: 3 mẫu lấy trung vị, phản hồi nhanh không nghẽn LVGL
+float readUltrasonicMedian() {
+    const int NUM_SAMPLES = 3;
+    float samples[NUM_SAMPLES];
+    int validCount = 0;
+
+    for (int i = 0; i < NUM_SAMPLES; i++) {
+        digitalWrite(TRIG_PIN, LOW);
+        delayMicroseconds(4);
+        digitalWrite(TRIG_PIN, HIGH);
+        delayMicroseconds(10);
+        digitalWrite(TRIG_PIN, LOW);
+
+        // Timeout 25000 us (~4.2m)
+        unsigned long duration = pulseIn(ECHO_PIN, HIGH, 25000UL);
+
+        if (duration > 0) {
+            float distance = duration * 0.0343f / 2.0f;
+            if (distance >= 2.0f && distance <= 400.0f) {
+                samples[validCount++] = distance;
+            }
+        }
+        delay(15);
+    }
+
+    if (validCount == 0) return -1.0f;
+
+    // Sắp xếp lấy giá trị Median
+    for (int i = 0; i < validCount - 1; i++) {
+        for (int j = i + 1; j < validCount; j++) {
+            if (samples[i] > samples[j]) {
+                float tmp = samples[i];
+                samples[i] = samples[j];
+                samples[j] = tmp;
+            }
+        }
+    }
+    return samples[validCount / 2];
+}
+
 // Phân cấp mức ngập theo yêu cầu:
 // - Cấp 0: Độ lụt < 20 cm -> Không có cảnh báo
 // - Cấp 1: Độ lụt từ 20 đến 50 cm -> Cảnh báo lụt nhẹ
@@ -329,19 +377,58 @@ void readSensors() {
     rainDigital = digitalRead(RAIN_DO);
     rainAnalog = analogRead(RAIN_AO);
 
-    // ================= ĐỘ LỤT (CHẠY 100% BẰNG SỐ TRÊN WEB) =================
-    // Bỏ hẳn việc đọc cảm biến ngập lụt, chạy hoàn toàn bằng số trên Web
-    // Sinh số nhảy nhẹ ngẫu nhiên quanh mức lụt (từ -0.3 đến +0.3 cm) để mô phỏng gợn nước thực tế
-    float jitter = ((float)random(-3, 4)) / 10.0f;
-    float simulatedWater = manualTargetWaterLevel + jitter;
-    if (simulatedWater < 0.0f) simulatedWater = 0.0f;
-    if (simulatedWater > SENSOR_MOUNT_HEIGHT_CM) simulatedWater = SENSOR_MOUNT_HEIGHT_CM;
+    // ================= ĐO MỰC NƯỚC / ĐỘ LỤT =================
+    if (manualTargetWaterLevel >= 0.0f) {
+        // TRƯỜNG HỢP 1: KHI NGƯỜI DÙNG NHẬP TRÊN WEB -> THEO SỐ TRÊN WEB
+        // Sinh số nhảy nhẹ ngẫu nhiên quanh mức lụt (từ -0.3 đến +0.3 cm)
+        float jitter = ((float)random(-3, 4)) / 10.0f;
+        float simulatedWater = manualTargetWaterLevel + jitter;
+        if (simulatedWater < 0.0f) simulatedWater = 0.0f;
+        if (simulatedWater > SENSOR_MOUNT_HEIGHT_CM) simulatedWater = SENSOR_MOUNT_HEIGHT_CM;
 
-    waterLevelCm = simulatedWater;
-    rawDistanceCm = SENSOR_MOUNT_HEIGHT_CM - waterLevelCm;
+        waterLevelCm = simulatedWater;
+        rawDistanceCm = SENSOR_MOUNT_HEIGHT_CM - waterLevelCm;
 
-    Serial.printf("[Web Water Level] Target: %.1f cm | Jitter: %+.1f cm -> Water: %.1f cm (Dist: %.1f cm)\n",
-                  manualTargetWaterLevel, jitter, waterLevelCm, rawDistanceCm);
+        Serial.printf("[Theo Web] Target: %.1f cm | Jitter: %+.1f cm -> Water: %.1f cm\n",
+                      manualTargetWaterLevel, jitter, waterLevelCm);
+    } else {
+        // TRƯỜNG HỢP 2: TỰ ĐỘNG ĐO THÔNG SỐ TỪ CẢM BIẾN VẬT LÝ
+        rawDistanceCm = readUltrasonicMedian();
+
+        if (rawDistanceCm < 0.0f) {
+            Serial.println("[Sensor Tu Do] Khong nhan duoc Echo -> giu gia tri nuoc cu");
+        } else {
+            // QUY TẮC THEO YÊU CẦU:
+            // 1. Khoảng cách cảm biến đo được: Nếu lớn hơn 100 cm thì mặc định là Bằng 100 cm.
+            float measuredDistance = rawDistanceCm;
+            if (measuredDistance > SENSOR_MOUNT_HEIGHT_CM) { // SENSOR_MOUNT_HEIGHT_CM = 100.0
+                measuredDistance = SENSOR_MOUNT_HEIGHT_CM;
+            }
+            if (measuredDistance < 0.0f) {
+                measuredDistance = 0.0f;
+            }
+
+            // 2. Khoảng cách đặt cảm biến mặc định là 100 cm.
+            // 3. Độ lụt = khoảng cách mặc định - khoảng cách cảm biến đo được.
+            float instantWater = SENSOR_MOUNT_HEIGHT_CM - measuredDistance;
+
+            // Lọc mượt nhẹ EMA để giá trị ổn định không bị giật số
+            if (!waterLevelInitialized) {
+                smoothedWaterLevel = instantWater;
+                waterLevelInitialized = true;
+            } else {
+                smoothedWaterLevel = (smoothedWaterLevel * 0.7f) + (instantWater * 0.3f);
+            }
+
+            if (smoothedWaterLevel < 0.0f) smoothedWaterLevel = 0.0f;
+            if (smoothedWaterLevel > SENSOR_MOUNT_HEIGHT_CM) smoothedWaterLevel = SENSOR_MOUNT_HEIGHT_CM;
+
+            waterLevelCm = smoothedWaterLevel;
+
+            Serial.printf("[Sensor Tu Do] Raw: %.1f cm | Clamped: %.1f cm -> Do Lut: %.1f cm\n",
+                          rawDistanceCm, measuredDistance, waterLevelCm);
+        }
+    }
 
     // Đo tốc độ gió
     long sumADC = 0;
@@ -412,7 +499,13 @@ void fetchManualFloodTarget() {
             if (target >= 0.0f && target <= 100.0f) {
                 if (fabs(target - manualTargetWaterLevel) > 0.01f) {
                     manualTargetWaterLevel = target;
-                    Serial.printf("\n>>> [WEB SYNC] Dong bo do lut tu Web: %.1f cm <<<\n", manualTargetWaterLevel);
+                    Serial.printf("\n>>> [WEB SYNC] Chuyen sang che do THEO WEB: %.1f cm <<<\n", manualTargetWaterLevel);
+                }
+            } else if (target < 0.0f) {
+                if (manualTargetWaterLevel >= 0.0f) {
+                    manualTargetWaterLevel = -1.0f;
+                    waterLevelInitialized = false;
+                    Serial.println("\n>>> [WEB SYNC] Chuyen sang che do CAM BIEN TU DO <<<");
                 }
             }
         }
@@ -427,6 +520,8 @@ void setup() {
     Serial.println("\n=== HE THONG QUAN TRAC MUA LU KHOI DONG ===");
 
     pinMode(RAIN_DO, INPUT);
+    pinMode(TRIG_PIN, OUTPUT);
+    pinMode(ECHO_PIN, INPUT);
     pinMode(WIND_PIN, INPUT);
 
     Wire.begin(21, 22);
