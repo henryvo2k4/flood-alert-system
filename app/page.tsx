@@ -8,7 +8,7 @@ import {
   ComposedChart, Bar, Area, Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis
 } from "recharts";
 import { 
-  Droplets, Wind, Thermometer, CloudRain, Activity, AlertCircle, MapPin, SlidersHorizontal
+  Droplets, Wind, Thermometer, CloudRain, Activity, AlertCircle, MapPin, SlidersHorizontal, RotateCcw, Check
 } from "lucide-react";
 
 // Tải Component bản đồ động (Bỏ qua SSR)
@@ -42,10 +42,44 @@ export default function AdvancedDashboard() {
   const [loading, setLoading] = useState(true);
   const [isAlertAcknowledged, setIsAlertAcknowledged] = useState(false);
 
-  // States cho tính năng mô phỏng / điều chỉnh độ lụt thủ công
-  const [manualInput, setManualInput] = useState<string>("");
+  // States cho tính năng đè / tùy chỉnh thông số toàn diện
+  const [overrides, setOverrides] = useState<{
+    water_level_cm: number | null;
+    temperature: number | null;
+    humidity: number | null;
+    pressure: number | null;
+    wind_speed_ms: number | null;
+    light_lux: number | null;
+    rain_status: "auto" | "rain" | "no_rain";
+  }>({
+    water_level_cm: null,
+    temperature: null,
+    humidity: null,
+    pressure: null,
+    wind_speed_ms: null,
+    light_lux: null,
+    rain_status: "auto",
+  });
+
+  const [inputValues, setInputValues] = useState<{
+    water_level_cm: string;
+    temperature: string;
+    humidity: string;
+    pressure: string;
+    wind_speed_ms: string;
+    light_lux: string;
+    rain_status: "auto" | "rain" | "no_rain";
+  }>({
+    water_level_cm: "",
+    temperature: "",
+    humidity: "",
+    pressure: "",
+    wind_speed_ms: "",
+    light_lux: "",
+    rain_status: "auto",
+  });
+
   const [isSubmittingManual, setIsSubmittingManual] = useState<boolean>(false);
-  const [currentManualTarget, setCurrentManualTarget] = useState<number | null>(null);
   const [manualStatusMsg, setManualStatusMsg] = useState<string>("");
 
   const formatTimestampLabel = (label: unknown) => {
@@ -57,12 +91,12 @@ export default function AdvancedDashboard() {
   };
 
   const fetchHistoryData = useCallback(async () => {
-    // 1. Lấy dữ liệu quan trắc thực tế từ trạm (bỏ qua bản ghi lệnh có rain_status = -99)
+    // 1. Lấy dữ liệu quan trắc thực tế từ trạm (bỏ qua bản ghi lệnh có rain_status < 0)
     const { data } = await supabase
       .from("sensor_logs")
       .select("*")
       .eq("station_id", STATION_ID)
-      .neq("rain_status", -99)
+      .gte("rain_status", 0)
       .order("created_at", { ascending: false })
       .limit(30);
 
@@ -72,22 +106,36 @@ export default function AdvancedDashboard() {
       if (data[0].water_level_cm < 20) setIsAlertAcknowledged(false);
     }
 
-    // 2. Lấy mức độ lụt thủ công gần nhất đã được cấu hình từ Web
-    const { data: manualData } = await supabase
+    // 2. Lấy lệnh tùy chỉnh thông số gần nhất đã được cấu hình từ Web
+    const { data: cmdData } = await supabase
       .from("sensor_logs")
-      .select("water_level_cm")
+      .select("*")
       .eq("station_id", STATION_ID)
-      .eq("rain_status", -99)
+      .lt("rain_status", 0)
       .order("created_at", { ascending: false })
       .limit(1);
 
-    if (manualData && manualData.length > 0 && manualData[0].water_level_cm >= 0) {
-      const target = manualData[0].water_level_cm;
-      setCurrentManualTarget(target);
-      setManualInput(target.toString());
-    } else {
-      setCurrentManualTarget(null);
-      setManualInput("");
+    if (cmdData && cmdData.length > 0) {
+      const cmd = cmdData[0];
+      const parsedOvr = {
+        water_level_cm: cmd.water_level_cm >= 0 && cmd.water_level_cm <= 100 ? cmd.water_level_cm : null,
+        temperature: cmd.temperature > -500 && cmd.temperature < 100 ? cmd.temperature : null,
+        humidity: cmd.humidity >= 0 && cmd.humidity <= 100 ? cmd.humidity : null,
+        pressure: cmd.pressure > 500 && cmd.pressure < 1300 ? cmd.pressure : null,
+        wind_speed_ms: cmd.wind_speed_ms >= 0 && cmd.wind_speed_ms < 100 ? cmd.wind_speed_ms : null,
+        light_lux: cmd.light_lux >= 0 ? cmd.light_lux : null,
+        rain_status: cmd.rain_status === -98 ? ("rain" as const) : cmd.rain_status === -97 ? ("no_rain" as const) : ("auto" as const),
+      };
+      setOverrides(parsedOvr);
+      setInputValues({
+        water_level_cm: parsedOvr.water_level_cm !== null ? parsedOvr.water_level_cm.toString() : "",
+        temperature: parsedOvr.temperature !== null ? parsedOvr.temperature.toString() : "",
+        humidity: parsedOvr.humidity !== null ? parsedOvr.humidity.toString() : "",
+        pressure: parsedOvr.pressure !== null ? parsedOvr.pressure.toString() : "",
+        wind_speed_ms: parsedOvr.wind_speed_ms !== null ? parsedOvr.wind_speed_ms.toString() : "",
+        light_lux: parsedOvr.light_lux !== null ? parsedOvr.light_lux.toString() : "",
+        rain_status: parsedOvr.rain_status,
+      });
     }
 
     setLoading(false);
@@ -102,76 +150,138 @@ export default function AdvancedDashboard() {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'sensor_logs', filter: `station_id=eq.${STATION_ID}` },
         (payload) => {
           const newData = payload.new as SensorData;
-          // Nếu là bản ghi lệnh điều khiển thủ công từ Web
-          if (newData.rain_status === -99) {
-            if (newData.water_level_cm >= 0) {
-              setCurrentManualTarget(newData.water_level_cm);
-              setManualInput(newData.water_level_cm.toString());
-            } else {
-              setCurrentManualTarget(null);
-              setManualInput("");
-            }
+          // Nếu là bản ghi lệnh điều khiển thủ công từ Web (rain_status < 0)
+          if (newData.rain_status < 0) {
+            const parsedOvr = {
+              water_level_cm: newData.water_level_cm >= 0 && newData.water_level_cm <= 100 ? newData.water_level_cm : null,
+              temperature: newData.temperature > -500 && newData.temperature < 100 ? newData.temperature : null,
+              humidity: newData.humidity >= 0 && newData.humidity <= 100 ? newData.humidity : null,
+              pressure: newData.pressure > 500 && newData.pressure < 1300 ? newData.pressure : null,
+              wind_speed_ms: newData.wind_speed_ms >= 0 && newData.wind_speed_ms < 100 ? newData.wind_speed_ms : null,
+              light_lux: newData.light_lux >= 0 ? newData.light_lux : null,
+              rain_status: newData.rain_status === -98 ? ("rain" as const) : newData.rain_status === -97 ? ("no_rain" as const) : ("auto" as const),
+            };
+            setOverrides(parsedOvr);
+            setInputValues({
+              water_level_cm: parsedOvr.water_level_cm !== null ? parsedOvr.water_level_cm.toString() : "",
+              temperature: parsedOvr.temperature !== null ? parsedOvr.temperature.toString() : "",
+              humidity: parsedOvr.humidity !== null ? parsedOvr.humidity.toString() : "",
+              pressure: parsedOvr.pressure !== null ? parsedOvr.pressure.toString() : "",
+              wind_speed_ms: parsedOvr.wind_speed_ms !== null ? parsedOvr.wind_speed_ms.toString() : "",
+              light_lux: parsedOvr.light_lux !== null ? parsedOvr.light_lux.toString() : "",
+              rain_status: parsedOvr.rain_status,
+            });
             return;
           }
+
           // Bản ghi dữ liệu quan trắc gửi từ thiết bị
           setLatestData(newData);
-          setHistoryData((current) => [newData, ...current.filter(item => item.rain_status !== -99)].slice(0, 30));
+          setHistoryData((current) => [newData, ...current.filter(item => item.rain_status >= 0)].slice(0, 30));
           if (newData.water_level_cm < 20) setIsAlertAcknowledged(false);
         }
       ).subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [fetchHistoryData]);
 
-  // Giữ số hiển thị trên Web nhảy nhẹ quanh mức lụt mục tiêu (±0.1 đến ±0.3 cm) khi đang ở chế độ Theo Web
+  // Giữ số hiển thị trên Web nhảy nhẹ quanh mức mục tiêu cho các thông số đang được đè từ Web
   useEffect(() => {
-    if (currentManualTarget === null || currentManualTarget < 0) return;
+    const hasAny = Object.entries(overrides).some(([k, v]) => k === "rain_status" ? v !== "auto" : v !== null);
+    if (!hasAny) return;
+
     const interval = setInterval(() => {
       setLatestData((prev) => {
         if (!prev) return prev;
-        // Rung nhẹ ngẫu nhiên quanh mức cơ sở
-        const jitter = Math.round((Math.random() * 0.6 - 0.3) * 10) / 10;
-        const newLevel = Math.max(0, Math.min(100, Number((currentManualTarget + jitter).toFixed(1))));
+        let { water_level_cm, temperature, humidity, pressure, wind_speed_ms, light_lux, rain_status } = prev;
+
+        if (overrides.water_level_cm !== null) {
+          const j = Math.round((Math.random() * 0.6 - 0.3) * 10) / 10;
+          water_level_cm = Math.max(0, Math.min(100, Number((overrides.water_level_cm + j).toFixed(1))));
+        }
+        if (overrides.temperature !== null) {
+          const j = Math.round((Math.random() * 0.4 - 0.2) * 10) / 10;
+          temperature = Number((overrides.temperature + j).toFixed(1));
+        }
+        if (overrides.humidity !== null) {
+          const j = Math.round((Math.random() * 1.0 - 0.5) * 10) / 10;
+          humidity = Math.max(0, Math.min(100, Number((overrides.humidity + j).toFixed(1))));
+        }
+        if (overrides.pressure !== null) {
+          const j = Math.round((Math.random() * 0.6 - 0.3) * 10) / 10;
+          pressure = Number((overrides.pressure + j).toFixed(1));
+        }
+        if (overrides.wind_speed_ms !== null) {
+          const j = Math.round((Math.random() * 0.4 - 0.2) * 10) / 10;
+          wind_speed_ms = Math.max(0, Number((overrides.wind_speed_ms + j).toFixed(1)));
+        }
+        if (overrides.light_lux !== null) {
+          const j = Math.round(Math.random() * 10 - 5);
+          light_lux = Math.max(0, overrides.light_lux + j);
+        }
+        if (overrides.rain_status !== "auto") {
+          rain_status = overrides.rain_status === "rain" ? 0 : 1;
+        }
+
         return {
           ...prev,
-          water_level_cm: newLevel
+          water_level_cm,
+          temperature,
+          humidity,
+          pressure,
+          wind_speed_ms,
+          light_lux,
+          rain_status
         };
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [currentManualTarget]);
+  }, [overrides]);
 
-  // Hàm gửi mức độ lụt thủ công xuống hệ thống (Supabase & Hardware)
-  const handleSetManualFlood = async (e?: React.FormEvent) => {
+  // Hàm áp dụng cấu hình tùy chỉnh xuống Supabase & Hardware
+  const handleApplyOverrides = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    const val = parseFloat(manualInput);
-    if (isNaN(val) || val < 0 || val > 100) {
-      setManualStatusMsg("Vui lòng nhập độ lụt hợp lệ từ 0 đến 100 cm!");
-      return;
-    }
-
     setIsSubmittingManual(true);
-    setManualStatusMsg("Đang đồng bộ xuống trạm...");
+    setManualStatusMsg("Đang đồng bộ cấu hình tùy chỉnh xuống trạm...");
 
     try {
-      setCurrentManualTarget(val);
-      setLatestData((prev) => prev ? { ...prev, water_level_cm: val } : null);
+      const parsedWater = inputValues.water_level_cm.trim() !== "" ? parseFloat(inputValues.water_level_cm) : null;
+      const parsedTemp = inputValues.temperature.trim() !== "" ? parseFloat(inputValues.temperature) : null;
+      const parsedHum = inputValues.humidity.trim() !== "" ? parseFloat(inputValues.humidity) : null;
+      const parsedPress = inputValues.pressure.trim() !== "" ? parseFloat(inputValues.pressure) : null;
+      const parsedWind = inputValues.wind_speed_ms.trim() !== "" ? parseFloat(inputValues.wind_speed_ms) : null;
+      const parsedLux = inputValues.light_lux.trim() !== "" ? parseFloat(inputValues.light_lux) : null;
 
-      // Gửi bản ghi lệnh có rain_status = -99 để thiết bị ESP32 nhận biết ngay lập tức
+      const newOvr = {
+        water_level_cm: parsedWater !== null && !isNaN(parsedWater) ? parsedWater : null,
+        temperature: parsedTemp !== null && !isNaN(parsedTemp) ? parsedTemp : null,
+        humidity: parsedHum !== null && !isNaN(parsedHum) ? parsedHum : null,
+        pressure: parsedPress !== null && !isNaN(parsedPress) ? parsedPress : null,
+        wind_speed_ms: parsedWind !== null && !isNaN(parsedWind) ? parsedWind : null,
+        light_lux: parsedLux !== null && !isNaN(parsedLux) ? parsedLux : null,
+        rain_status: inputValues.rain_status,
+      };
+
+      setOverrides(newOvr);
+
+      // Mã hóa rain_status: -98 = Mưa, -97 = Tạnh, -99 = Tự đo
+      let rainCode = -99;
+      if (newOvr.rain_status === "rain") rainCode = -98;
+      else if (newOvr.rain_status === "no_rain") rainCode = -97;
+
       const { error } = await supabase.from("sensor_logs").insert([{
         station_id: STATION_ID,
-        water_level_cm: val,
-        rain_status: -99,
-        temperature: -999,
-        humidity: 0,
-        pressure: 0,
-        light_lux: 0,
-        wind_speed_ms: 0
+        water_level_cm: newOvr.water_level_cm !== null ? newOvr.water_level_cm : -999,
+        temperature: newOvr.temperature !== null ? newOvr.temperature : -999,
+        humidity: newOvr.humidity !== null ? newOvr.humidity : -999,
+        pressure: newOvr.pressure !== null ? newOvr.pressure : -999,
+        wind_speed_ms: newOvr.wind_speed_ms !== null ? newOvr.wind_speed_ms : -999,
+        light_lux: newOvr.light_lux !== null ? newOvr.light_lux : -999,
+        rain_status: rainCode,
       }]);
 
       if (error) {
         setManualStatusMsg("Lỗi gửi dữ liệu: " + error.message);
       } else {
-        setManualStatusMsg(`Đã kích hoạt chế độ Theo Web: ${val.toFixed(1)} cm!`);
+        setManualStatusMsg("Đã đồng bộ cấu hình thành công! Màn hình & Web đang hiển thị theo cấu hình.");
         setTimeout(() => setManualStatusMsg(""), 4000);
       }
     } catch (err: unknown) {
@@ -182,31 +292,46 @@ export default function AdvancedDashboard() {
     }
   };
 
-  // Hàm chuyển về chế độ cảm biến tự đo (bỏ đè theo Web)
-  const handleResetToAuto = async () => {
+  // Hàm đặt lại tất cả về chế độ cảm biến tự đo
+  const handleResetAllToAuto = async () => {
     setIsSubmittingManual(true);
-    setManualStatusMsg("Đang chuyển về chế độ cảm biến tự đo...");
+    setManualStatusMsg("Đang chuyển tất cả thông số về cảm biến tự đo...");
 
     try {
-      setCurrentManualTarget(null);
-      setManualInput("");
+      setOverrides({
+        water_level_cm: null,
+        temperature: null,
+        humidity: null,
+        pressure: null,
+        wind_speed_ms: null,
+        light_lux: null,
+        rain_status: "auto",
+      });
+      setInputValues({
+        water_level_cm: "",
+        temperature: "",
+        humidity: "",
+        pressure: "",
+        wind_speed_ms: "",
+        light_lux: "",
+        rain_status: "auto",
+      });
 
-      // Gửi bản ghi lệnh có water_level_cm = -1 để ESP32 chuyển sang đọc cảm biến siêu âm tự đo
       const { error } = await supabase.from("sensor_logs").insert([{
         station_id: STATION_ID,
-        water_level_cm: -1,
-        rain_status: -99,
+        water_level_cm: -999,
         temperature: -999,
-        humidity: 0,
-        pressure: 0,
-        light_lux: 0,
-        wind_speed_ms: 0
+        humidity: -999,
+        pressure: -999,
+        wind_speed_ms: -999,
+        light_lux: -999,
+        rain_status: -99,
       }]);
 
       if (error) {
         setManualStatusMsg("Lỗi: " + error.message);
       } else {
-        setManualStatusMsg("Đã chuyển về chế độ cảm biến tự đo! Màn hình & Web đang nhận dữ liệu từ cảm biến.");
+        setManualStatusMsg("Đã chuyển tất cả thông số về cảm biến tự đo thành công!");
         setTimeout(() => setManualStatusMsg(""), 4000);
       }
     } catch (err: unknown) {
@@ -216,6 +341,17 @@ export default function AdvancedDashboard() {
       setIsSubmittingManual(false);
     }
   };
+
+  const hasAnyOverride = Object.entries(overrides).some(([k, v]) => k === "rain_status" ? v !== "auto" : v !== null);
+  const overrideCount = [
+    overrides.water_level_cm !== null,
+    overrides.temperature !== null,
+    overrides.humidity !== null,
+    overrides.pressure !== null,
+    overrides.wind_speed_ms !== null,
+    overrides.light_lux !== null,
+    overrides.rain_status !== "auto"
+  ].filter(Boolean).length;
 
   const isFlooded = latestData !== null && latestData.water_level_cm >= 20;
 
@@ -464,58 +600,218 @@ export default function AdvancedDashboard() {
           </div>
         </div>
 
-        {/* Ô ĐIỀU CHỈNH / ĐÈ ĐỘ LỤT (TỰ ĐO BẰNG CẢM BIẾN, KHI NHẬP TRÊN WEB THÌ THEO WEB) */}
-        <div className={`${neuCard} flex flex-col md:flex-row items-center justify-between gap-4 border border-blue-200/60 bg-gradient-to-r from-blue-50/50 via-[#f4f7fb] to-indigo-50/50`}>
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-600 shadow-inner">
-              <SlidersHorizontal size={22} />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">
-                  Điều khiển độ lụt
-                </h3>
-                <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${currentManualTarget !== null ? "bg-amber-100 text-amber-700 border border-amber-300" : "bg-emerald-100 text-emerald-700 border border-emerald-300"}`}>
-                  {currentManualTarget !== null ? `Đang theo Web: ${currentManualTarget.toFixed(1)} cm` : "Đang cảm biến tự đo"}
-                </span>
+        {/* BẢNG ĐIỀU KHIỂN & ĐÈ THÔNG SỐ TOÀN DIỆN (THEO WEB HOẶC CẢM BIẾN TỰ ĐO) */}
+        <div className={`${neuCard} flex flex-col gap-5 border border-blue-200/60 bg-gradient-to-r from-blue-50/50 via-[#f4f7fb] to-indigo-50/50`}>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-600 shadow-inner">
+                <SlidersHorizontal size={22} />
               </div>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Mặc định hệ thống tự đo bằng cảm biến siêu âm. Lúc nào nhập số vào ô bên cạnh thì màn hình & Web sẽ chạy theo số Web.
-              </p>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-black text-slate-800 uppercase tracking-wide">
+                    Tùy chỉnh thông số hệ thống
+                  </h3>
+                  <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${
+                    hasAnyOverride 
+                      ? "bg-amber-100 text-amber-700 border border-amber-300" 
+                      : "bg-emerald-100 text-emerald-700 border border-emerald-300"
+                  }`}>
+                    {hasAnyOverride ? `Đang tùy chỉnh ${overrideCount}/7 thông số` : "Tất cả thông số đang tự đo"}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Nhập giá trị để trạm & web chạy theo số web. Để trống hoặc chọn &quot;Cảm biến tự đo&quot; để chạy theo cảm biến thực tế.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 self-end md:self-auto">
+              {hasAnyOverride && (
+                <button
+                  type="button"
+                  onClick={handleResetAllToAuto}
+                  disabled={isSubmittingManual}
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-200 hover:bg-slate-300 active:scale-95 text-slate-700 text-xs font-bold rounded-xl shadow transition-all duration-150 disabled:opacity-50 cursor-pointer"
+                >
+                  <RotateCcw size={14} /> Đặt lại tất cả về tự đo
+                </button>
+              )}
             </div>
           </div>
 
-          <form onSubmit={handleSetManualFlood} className="flex items-center gap-2 w-full md:w-auto">
-            <div className="relative flex-1 md:w-36">
-              <input
-                type="number"
-                step="0.1"
-                min="0"
-                max="100"
-                value={manualInput}
-                onChange={(e) => setManualInput(e.target.value)}
-                placeholder="Độ lụt (cm)"
-                className="w-full px-3.5 py-2 text-sm font-bold bg-white rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner text-slate-800"
-              />
-              <span className="absolute right-3 top-2 text-xs font-bold text-slate-400">cm</span>
+          <form onSubmit={handleApplyOverrides} className="flex flex-col gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
+              {/* 1. Mực nước / Độ lụt */}
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
+                  <span>Mực nước</span>
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${overrides.water_level_cm !== null ? "bg-amber-200 text-amber-800" : "text-slate-400"}`}>
+                    {overrides.water_level_cm !== null ? "Theo Web" : "Tự đo"}
+                  </span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="100"
+                    value={inputValues.water_level_cm}
+                    onChange={(e) => setInputValues(prev => ({ ...prev, water_level_cm: e.target.value }))}
+                    placeholder="Tự đo"
+                    className="w-full px-2.5 py-2 text-xs font-bold bg-white rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner text-slate-800 pr-7"
+                  />
+                  <span className="absolute right-2 top-2 text-[10px] font-bold text-slate-400">cm</span>
+                </div>
+              </div>
+
+              {/* 2. Nhiệt độ */}
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
+                  <span>Nhiệt độ</span>
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${overrides.temperature !== null ? "bg-amber-200 text-amber-800" : "text-slate-400"}`}>
+                    {overrides.temperature !== null ? "Theo Web" : "Tự đo"}
+                  </span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="-40"
+                    max="80"
+                    value={inputValues.temperature}
+                    onChange={(e) => setInputValues(prev => ({ ...prev, temperature: e.target.value }))}
+                    placeholder="Tự đo"
+                    className="w-full px-2.5 py-2 text-xs font-bold bg-white rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner text-slate-800 pr-7"
+                  />
+                  <span className="absolute right-2 top-2 text-[10px] font-bold text-slate-400">°C</span>
+                </div>
+              </div>
+
+              {/* 3. Độ ẩm */}
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
+                  <span>Độ ẩm</span>
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${overrides.humidity !== null ? "bg-amber-200 text-amber-800" : "text-slate-400"}`}>
+                    {overrides.humidity !== null ? "Theo Web" : "Tự đo"}
+                  </span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    step="1"
+                    min="0"
+                    max="100"
+                    value={inputValues.humidity}
+                    onChange={(e) => setInputValues(prev => ({ ...prev, humidity: e.target.value }))}
+                    placeholder="Tự đo"
+                    className="w-full px-2.5 py-2 text-xs font-bold bg-white rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner text-slate-800 pr-7"
+                  />
+                  <span className="absolute right-2 top-2 text-[10px] font-bold text-slate-400">%</span>
+                </div>
+              </div>
+
+              {/* 4. Sức gió */}
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
+                  <span>Sức gió</span>
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${overrides.wind_speed_ms !== null ? "bg-amber-200 text-amber-800" : "text-slate-400"}`}>
+                    {overrides.wind_speed_ms !== null ? "Theo Web" : "Tự đo"}
+                  </span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="50"
+                    value={inputValues.wind_speed_ms}
+                    onChange={(e) => setInputValues(prev => ({ ...prev, wind_speed_ms: e.target.value }))}
+                    placeholder="Tự đo"
+                    className="w-full px-2.5 py-2 text-xs font-bold bg-white rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner text-slate-800 pr-8"
+                  />
+                  <span className="absolute right-2 top-2 text-[10px] font-bold text-slate-400">m/s</span>
+                </div>
+              </div>
+
+              {/* 5. Áp suất */}
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
+                  <span>Áp suất</span>
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${overrides.pressure !== null ? "bg-amber-200 text-amber-800" : "text-slate-400"}`}>
+                    {overrides.pressure !== null ? "Theo Web" : "Tự đo"}
+                  </span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    step="1"
+                    min="800"
+                    max="1200"
+                    value={inputValues.pressure}
+                    onChange={(e) => setInputValues(prev => ({ ...prev, pressure: e.target.value }))}
+                    placeholder="Tự đo"
+                    className="w-full px-2.5 py-2 text-xs font-bold bg-white rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner text-slate-800 pr-8"
+                  />
+                  <span className="absolute right-2 top-2 text-[10px] font-bold text-slate-400">hPa</span>
+                </div>
+              </div>
+
+              {/* 6. Ánh sáng */}
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
+                  <span>Ánh sáng</span>
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${overrides.light_lux !== null ? "bg-amber-200 text-amber-800" : "text-slate-400"}`}>
+                    {overrides.light_lux !== null ? "Theo Web" : "Tự đo"}
+                  </span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    step="10"
+                    min="0"
+                    max="100000"
+                    value={inputValues.light_lux}
+                    onChange={(e) => setInputValues(prev => ({ ...prev, light_lux: e.target.value }))}
+                    placeholder="Tự đo"
+                    className="w-full px-2.5 py-2 text-xs font-bold bg-white rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner text-slate-800 pr-7"
+                  />
+                  <span className="absolute right-2 top-2 text-[10px] font-bold text-slate-400">lx</span>
+                </div>
+              </div>
+
+              {/* 7. Lượng mưa */}
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
+                  <span>Mưa</span>
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${overrides.rain_status !== "auto" ? "bg-amber-200 text-amber-800" : "text-slate-400"}`}>
+                    {overrides.rain_status !== "auto" ? "Theo Web" : "Tự đo"}
+                  </span>
+                </label>
+                <select
+                  value={inputValues.rain_status}
+                  onChange={(e) => setInputValues(prev => ({ ...prev, rain_status: e.target.value as "auto" | "rain" | "no_rain" }))}
+                  className="w-full px-2 py-2 text-xs font-bold bg-white rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner text-slate-800"
+                >
+                  <option value="auto">Cảm biến tự đo</option>
+                  <option value="rain">Đang mưa (Đè)</option>
+                  <option value="no_rain">Tạnh ráo (Đè)</option>
+                </select>
+              </div>
             </div>
-            <button
-              type="submit"
-              disabled={isSubmittingManual}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-sm font-bold rounded-xl shadow-md transition-all duration-150 disabled:opacity-50 shrink-0 cursor-pointer"
-            >
-              {isSubmittingManual ? "..." : "Theo Web"}
-            </button>
-            {currentManualTarget !== null && (
+
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-slate-200/60">
+              <span className="text-xs text-slate-500">
+                Mẹo: Xóa trống ô của thông số nào thì thông số đó sẽ lập tức chuyển về tự đo bằng cảm biến thật.
+              </span>
               <button
-                type="button"
-                onClick={handleResetToAuto}
+                type="submit"
                 disabled={isSubmittingManual}
-                className="px-3.5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm font-bold rounded-xl shadow transition-all duration-150 disabled:opacity-50 shrink-0 cursor-pointer"
+                className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-bold rounded-xl shadow-md transition-all duration-150 disabled:opacity-50 cursor-pointer self-stretch sm:self-auto justify-center"
               >
-                Về tự đo
+                <Check size={16} /> {isSubmittingManual ? "Đang gửi..." : "Áp dụng cấu hình"}
               </button>
-            )}
+            </div>
           </form>
         </div>
         {manualStatusMsg && (

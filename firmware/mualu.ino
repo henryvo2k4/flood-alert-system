@@ -63,10 +63,15 @@ bool isConfigPortalActive = false;
 unsigned long prevSensorReadTime = 0;
 const unsigned long INTERVAL_SENSOR_READ = 1000; // Đọc cảm biến và refresh LVGL mỗi 1s
 
-// Chế độ đo độ lụt:
-// manualTargetWaterLevel >= 0.0f : Chế độ THEO SỐ TRÊN WEB (khi người dùng nhập trên web)
-// manualTargetWaterLevel < 0.0f  : Chế độ TỰ ĐỘNG ĐO (đọc cảm biến siêu âm JSN-SR04T)
-float manualTargetWaterLevel = -1.0f; // Mặc định khởi động ở chế độ tự đo
+// Các biến đè thông số từ Web (Nếu giá trị != -999: Chạy theo Web; Nếu == -999: Tự đo bằng cảm biến)
+float manualWaterLevel = -999.0f; // Độ lụt (0-100 cm)
+float manualTemp       = -999.0f; // Nhiệt độ (°C)
+float manualHum        = -999.0f; // Độ ẩm (%)
+float manualPress      = -999.0f; // Khí áp (hPa)
+float manualWind       = -999.0f; // Tốc độ gió (m/s)
+float manualLux        = -999.0f; // Ánh sáng (lux)
+int   manualRain       = -999;    // Mưa (0: Đang mưa, 1: Tạnh ráo, -999: Tự đo)
+
 unsigned long prevTargetFetchTime = 0;
 const unsigned long INTERVAL_TARGET_FETCH = 1000; // Kiểm tra lệnh từ Web mỗi 1s
 
@@ -367,34 +372,62 @@ int getFloodTier(float level) {
 
 // ================= CẢM BIẾN & HTTP SUPABASE =================
 void readSensors() {
-    temp = bme.readTemperature();
-    hum = bme.readHumidity();
-    press = bme.readPressure() / 100.0F;
+    // 1. NHIỆT ĐỘ: Nếu có cấu hình đè từ Web thì theo Web, ngược lại đọc BME280
+    if (manualTemp > -500.0f) {
+        float jitter = ((float)random(-2, 3)) / 10.0f; // Dao động nhẹ ±0.1 ~ ±0.2 °C
+        temp = manualTemp + jitter;
+    } else {
+        temp = bme.readTemperature();
+    }
 
-    lux = lightMeter.readLightLevel();
-    if (lux < 0) lux = 0;
+    // 2. ĐỘ ẨM: Nếu có cấu hình đè từ Web thì theo Web, ngược lại đọc BME280
+    if (manualHum >= 0.0f) {
+        float jitter = ((float)random(-5, 6)) / 10.0f; // Dao động nhẹ ±0.5 %
+        hum = manualHum + jitter;
+        if (hum < 0.0f) hum = 0.0f;
+        if (hum > 100.0f) hum = 100.0f;
+    } else {
+        hum = bme.readHumidity();
+    }
 
-    rainDigital = digitalRead(RAIN_DO);
-    rainAnalog = analogRead(RAIN_AO);
+    // 3. ÁP SUẤT KHÍ QUYỂN: Nếu có cấu hình đè từ Web thì theo Web, ngược lại đọc BME280
+    if (manualPress > 0.0f) {
+        float jitter = ((float)random(-3, 4)) / 10.0f; // Dao động nhẹ ±0.3 hPa
+        press = manualPress + jitter;
+    } else {
+        press = bme.readPressure() / 100.0F;
+    }
 
-    // ================= ĐO MỰC NƯỚC / ĐỘ LỤT =================
-    if (manualTargetWaterLevel >= 0.0f) {
-        // TRƯỜNG HỢP 1: KHI NGƯỜI DÙNG NHẬP TRÊN WEB -> THEO SỐ TRÊN WEB
-        // Sinh số nhảy nhẹ ngẫu nhiên quanh mức lụt (từ -0.3 đến +0.3 cm)
+    // 4. ÁNH SÁNG LUX: Nếu có cấu hình đè từ Web thì theo Web, ngược lại đọc BH1750
+    if (manualLux >= 0.0f) {
+        float jitter = (float)random(-5, 6);
+        lux = manualLux + jitter;
+        if (lux < 0.0f) lux = 0.0f;
+    } else {
+        lux = lightMeter.readLightLevel();
+        if (lux < 0.0f) lux = 0.0f;
+    }
+
+    // 5. CẢM BIẾN MƯA: Nếu có cấu hình đè từ Web thì theo Web, ngược lại đọc chân DO/AO
+    if (manualRain >= 0) {
+        rainDigital = manualRain;
+        rainAnalog = (manualRain == 0) ? 800 : 4095; // 0 = Đang mưa (analog thấp), 1 = Tạnh (analog cao)
+    } else {
+        rainDigital = digitalRead(RAIN_DO);
+        rainAnalog = analogRead(RAIN_AO);
+    }
+
+    // 6. MỰC NƯỚC / ĐỘ LỤT: Nếu có cấu hình đè từ Web thì theo Web, ngược lại tự đo bằng JSN-SR04T
+    if (manualWaterLevel >= 0.0f) {
         float jitter = ((float)random(-3, 4)) / 10.0f;
-        float simulatedWater = manualTargetWaterLevel + jitter;
+        float simulatedWater = manualWaterLevel + jitter;
         if (simulatedWater < 0.0f) simulatedWater = 0.0f;
         if (simulatedWater > SENSOR_MOUNT_HEIGHT_CM) simulatedWater = SENSOR_MOUNT_HEIGHT_CM;
 
         waterLevelCm = simulatedWater;
         rawDistanceCm = SENSOR_MOUNT_HEIGHT_CM - waterLevelCm;
-
-        Serial.printf("[Theo Web] Target: %.1f cm | Jitter: %+.1f cm -> Water: %.1f cm\n",
-                      manualTargetWaterLevel, jitter, waterLevelCm);
     } else {
-        // TRƯỜNG HỢP 2: TỰ ĐỘNG ĐO THÔNG SỐ TỪ CẢM BIẾN VẬT LÝ
         rawDistanceCm = readUltrasonicMedian();
-
         if (rawDistanceCm < 0.0f) {
             Serial.println("[Sensor Tu Do] Khong nhan duoc Echo -> giu gia tri nuoc cu");
         } else {
@@ -424,22 +457,25 @@ void readSensors() {
             if (smoothedWaterLevel > SENSOR_MOUNT_HEIGHT_CM) smoothedWaterLevel = SENSOR_MOUNT_HEIGHT_CM;
 
             waterLevelCm = smoothedWaterLevel;
-
-            Serial.printf("[Sensor Tu Do] Raw: %.1f cm | Clamped: %.1f cm -> Do Lut: %.1f cm\n",
-                          rawDistanceCm, measuredDistance, waterLevelCm);
         }
     }
 
-    // Đo tốc độ gió
-    long sumADC = 0;
-    for (int i = 0; i < 20; i++) {
-        sumADC += analogRead(WIND_PIN);
-        delay(2);
+    // 7. TỐC ĐỘ GIÓ: Nếu có cấu hình đè từ Web thì theo Web, ngược lại đọc từ chân ADC 34
+    if (manualWind >= 0.0f) {
+        float jitter = ((float)random(-2, 3)) / 10.0f;
+        windSpeed = manualWind + jitter;
+        if (windSpeed < 0.0f) windSpeed = 0.0f;
+    } else {
+        long sumADC = 0;
+        for (int i = 0; i < 20; i++) {
+            sumADC += analogRead(WIND_PIN);
+            delay(2);
+        }
+        float espVoltage = ((sumADC / 20.0f) / 4095.0f) * 3.3f;
+        float rawWind = ((espVoltage / WIND_DIVIDER_RATIO) / 5.0f) * 30.0f;
+        if ((espVoltage / WIND_DIVIDER_RATIO) < 0.1f) rawWind = 0.0f;
+        windSpeed = (windSpeed * 0.7f) + (rawWind * 0.3f);
     }
-    float espVoltage = ((sumADC / 20.0f) / 4095.0f) * 3.3f;
-    float rawWind = ((espVoltage / WIND_DIVIDER_RATIO) / 5.0f) * 30.0f;
-    if ((espVoltage / WIND_DIVIDER_RATIO) < 0.1f) rawWind = 0.0f;
-    windSpeed = (windSpeed * 0.7f) + (rawWind * 0.3f);
 
     Serial.printf("[Sensor] T:%.1f*C | H:%.0f%% | P:%.0fhPa | W:%.1fm/s | Water:%.1fcm (Tier:%d) | Rain:%d | Lux:%.0f\n",
                   temp, hum, press, windSpeed, waterLevelCm, getFloodTier(waterLevelCm), rainDigital, lux);
@@ -478,12 +514,12 @@ void sendDataToSupabase() {
     http.end();
 }
 
-// ================= ĐỒNG BỘ ĐỘ LỤT TỪ SUPABASE =================
-void fetchManualFloodTarget() {
+// ================= ĐỒNG BỘ CẤU HÌNH THÔNG SỐ TÙY CHỈNH TỪ SUPABASE =================
+void fetchManualOverrides() {
     if (WiFi.status() != WL_CONNECTED) return;
 
     HTTPClient http;
-    String url = String(SUPABASE_URL) + "?station_id=eq." + STATION_ID + "&rain_status=eq.-99&select=water_level_cm&order=created_at.desc&limit=1";
+    String url = String(SUPABASE_URL) + "?station_id=eq." + STATION_ID + "&rain_status=lt.0&order=created_at.desc&limit=1";
     http.begin(url);
     http.setTimeout(800);
     http.addHeader("apikey", SUPABASE_ANON_KEY);
@@ -492,22 +528,40 @@ void fetchManualFloodTarget() {
     int httpCode = http.GET();
     if (httpCode == 200) {
         String payload = http.getString();
-        StaticJsonDocument<256> doc;
+        StaticJsonDocument<512> doc;
         DeserializationError error = deserializeJson(doc, payload);
         if (!error && doc.size() > 0) {
-            float target = doc[0]["water_level_cm"].as<float>();
-            if (target >= 0.0f && target <= 100.0f) {
-                if (fabs(target - manualTargetWaterLevel) > 0.01f) {
-                    manualTargetWaterLevel = target;
-                    Serial.printf("\n>>> [WEB SYNC] Chuyen sang che do THEO WEB: %.1f cm <<<\n", manualTargetWaterLevel);
-                }
-            } else if (target < 0.0f) {
-                if (manualTargetWaterLevel >= 0.0f) {
-                    manualTargetWaterLevel = -1.0f;
-                    waterLevelInitialized = false;
-                    Serial.println("\n>>> [WEB SYNC] Chuyen sang che do CAM BIEN TU DO <<<");
-                }
-            }
+            JsonObject cmd = doc[0];
+
+            // 1. Độ lụt: >= 0 thì theo web, < 0 thì tự đo
+            float w = cmd["water_level_cm"].as<float>();
+            manualWaterLevel = (w >= 0.0f && w <= 100.0f) ? w : -999.0f;
+
+            // 2. Nhiệt độ: > -500 thì theo web, ngược lại tự đo
+            float t = cmd["temperature"].as<float>();
+            manualTemp = (t > -500.0f && t < 100.0f) ? t : -999.0f;
+
+            // 3. Độ ẩm: >= 0 thì theo web, ngược lại tự đo
+            float h = cmd["humidity"].as<float>();
+            manualHum = (h >= 0.0f && h <= 100.0f) ? h : -999.0f;
+
+            // 4. Khí áp: > 500 thì theo web, ngược lại tự đo
+            float p = cmd["pressure"].as<float>();
+            manualPress = (p > 500.0f && p < 1300.0f) ? p : -999.0f;
+
+            // 5. Tốc độ gió: >= 0 thì theo web, ngược lại tự đo
+            float ws = cmd["wind_speed_ms"].as<float>();
+            manualWind = (ws >= 0.0f && ws < 100.0f) ? ws : -999.0f;
+
+            // 6. Ánh sáng lux: >= 0 thì theo web, ngược lại tự đo
+            float l = cmd["light_lux"].as<float>();
+            manualLux = (l >= 0.0f) ? l : -999.0f;
+
+            // 7. Mưa: -98 = Đang mưa, -97 = Tạnh ráo, -99 = Tự đo
+            int r = cmd["rain_status"].as<int>();
+            if (r == -98) manualRain = 0;       // Đè: Đang mưa
+            else if (r == -97) manualRain = 1;  // Đè: Tạnh ráo
+            else manualRain = -999;             // Tự đo
         }
     }
     http.end();
@@ -554,8 +608,8 @@ void setup() {
         return;
     }
 
-    // Lấy ngay mức độ lụt từ Web nếu có
-    fetchManualFloodTarget();
+    // Lấy ngay cấu hình thông số từ Web nếu có
+    fetchManualOverrides();
 
     // Khởi tạo giao diện quan trắc chính LVGL
     ui_init();
@@ -588,10 +642,10 @@ void loop() {
 
     unsigned long currentMillis = millis();
 
-    // Đồng bộ mức độ lụt từ Web mỗi 1 giây
+    // Đồng bộ cấu hình tùy chỉnh từ Web mỗi 1 giây
     if (currentMillis - prevTargetFetchTime >= INTERVAL_TARGET_FETCH) {
         prevTargetFetchTime = currentMillis;
-        fetchManualFloodTarget();
+        fetchManualOverrides();
     }
 
     // Đọc cảm biến và cập nhật giao diện màn hình mỗi 1 giây
@@ -599,7 +653,7 @@ void loop() {
         prevSensorReadTime = currentMillis;
         readSensors();
 
-        // Cập nhật cấp độ ngập trực tiếp từ độ lụt Web
+        // Cập nhật cấp độ ngập trực tiếp
         confirmedFloodLevel = getFloodTier(waterLevelCm);
 
         // Cập nhật giao diện TFT với thông số mượt và cấp cảnh báo
