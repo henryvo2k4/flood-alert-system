@@ -85,6 +85,9 @@ export default function AdvancedDashboard() {
       const target = manualData[0].water_level_cm;
       setCurrentManualTarget(target);
       setManualInput(target.toString());
+    } else {
+      setCurrentManualTarget(0);
+      setManualInput("0");
     }
 
     setLoading(false);
@@ -114,21 +117,21 @@ export default function AdvancedDashboard() {
     return () => { supabase.removeChannel(channel); };
   }, [fetchHistoryData]);
 
-  // Giữ số hiển thị trên Web nhảy nhẹ quanh mức lụt mục tiêu (±0.1 đến ±0.2 cm) tạo hiệu ứng nước dập dềnh
+  // Giữ số hiển thị trên Web nhảy nhẹ quanh mức lụt mục tiêu (±0.1 đến ±0.3 cm) tạo hiệu ứng nước dập dềnh mỗi 1 giây
   useEffect(() => {
     if (currentManualTarget === null) return;
     const interval = setInterval(() => {
       setLatestData((prev) => {
         if (!prev) return prev;
         // Rung nhẹ ngẫu nhiên quanh mức cơ sở
-        const jitter = Math.round((Math.random() * 0.4 - 0.2) * 10) / 10;
+        const jitter = Math.round((Math.random() * 0.6 - 0.3) * 10) / 10;
         const newLevel = Math.max(0, Math.min(100, Number((currentManualTarget + jitter).toFixed(1))));
         return {
           ...prev,
           water_level_cm: newLevel
         };
       });
-    }, 2000);
+    }, 1000);
     return () => clearInterval(interval);
   }, [currentManualTarget]);
 
@@ -421,7 +424,7 @@ export default function AdvancedDashboard() {
           </div>
         </div>
 
-        {/* Ô ĐIỀU CHỈNH / MÔ PHỎNG ĐỘ LỤT (KHI CẢM BIẾN LỖI - ĐỒNG BỘ REALTIME CẢ WEB VÀ MÀN HÌNH) */}
+        {/* Ô ĐIỀU CHỈNH / MÔ PHỎNG ĐỘ LỤT (CHẠY 100% SỐ TRÊN WEB - ĐỒNG BỘ REALTIME 1S CẢ WEB VÀ MÀN HÌNH) */}
         <div className={`${neuCard} flex flex-col md:flex-row items-center justify-between gap-4 border border-blue-200/60 bg-gradient-to-r from-blue-50/50 via-[#f4f7fb] to-indigo-50/50`}>
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-600 shadow-inner">
@@ -429,10 +432,10 @@ export default function AdvancedDashboard() {
             </div>
             <div>
               <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">
-                Mô phỏng độ lụt (Đồng bộ Realtime xuống màn hình & web)
+                Cài đặt độ lụt (Đồng bộ Realtime 1s cả Web và Màn hình)
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Cảm biến siêu âm gặp sự cố — Nhập độ lụt (0 - 100 cm) để hệ thống tự động nhảy nhẹ quanh mức này và đồng bộ thời gian thực.
+                Chạy hoàn toàn bằng số trên Web — Nhập độ lụt (0 - 100 cm), hệ thống sẽ tự động dao động nhẹ ±0.x cm và đồng bộ tức thì mỗi 1 giây.
               </p>
             </div>
           </div>
