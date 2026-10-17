@@ -8,7 +8,7 @@ import {
   ComposedChart, Bar, Area, Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis
 } from "recharts";
 import { 
-  Droplets, Wind, Thermometer, CloudRain, Activity, AlertCircle, MapPin, SlidersHorizontal, RotateCcw, Check
+  Droplets, Wind, Thermometer, CloudRain, Activity, AlertCircle, MapPin, SlidersHorizontal, RotateCcw, Check, Settings, X
 } from "lucide-react";
 
 // Tải Component bản đồ động (Bỏ qua SSR)
@@ -81,6 +81,7 @@ export default function AdvancedDashboard() {
 
   const [isSubmittingManual, setIsSubmittingManual] = useState<boolean>(false);
   const [manualStatusMsg, setManualStatusMsg] = useState<string>("");
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
 
   const formatTimestampLabel = (label: unknown) => {
     const raw = typeof label === "string" || typeof label === "number" || label instanceof Date
@@ -422,10 +423,27 @@ export default function AdvancedDashboard() {
             <p className="text-sm font-medium text-slate-500">Real-time flood monitoring and alert system</p>
           </div>
           
-          <div className={`flex items-center gap-3 px-6 py-3 text-sm font-bold ${neuCard} rounded-full! py-2.5!
-            ${isFlooded ? "text-red-600 border-red-200" : isStormy ? "text-orange-600" : "text-emerald-600"}`}>
-            <div className={`w-2.5 h-2.5 rounded-full ${isFlooded ? "bg-red-500 animate-ping" : isStormy ? "bg-orange-500" : "bg-emerald-500"}`}></div>
-            {isFlooded ? floodTierTitle : isStormy ? "WARNING: STORM CONDITIONS" : "SYSTEM STABLE"}
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <div className={`flex items-center gap-3 px-6 py-3 text-sm font-bold ${neuCard} rounded-full! py-2.5!
+              ${isFlooded ? "text-red-600 border-red-200" : isStormy ? "text-orange-600" : "text-emerald-600"}`}>
+              <div className={`w-2.5 h-2.5 rounded-full ${isFlooded ? "bg-red-500 animate-ping" : isStormy ? "bg-orange-500" : "bg-emerald-500"}`}></div>
+              {isFlooded ? floodTierTitle : isStormy ? "WARNING: STORM CONDITIONS" : "SYSTEM STABLE"}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsSettingsOpen(true)}
+              className="flex items-center gap-2 px-4 py-2.5 text-xs font-bold rounded-full bg-white hover:bg-blue-50 text-slate-700 hover:text-blue-600 border border-slate-200 shadow-md transition-all active:scale-95 cursor-pointer"
+              title="Mở bảng tùy chỉnh thông số"
+            >
+              <Settings size={16} className={hasAnyOverride ? "text-amber-500" : "text-slate-600"} />
+              <span>Tùy chỉnh thông số</span>
+              {hasAnyOverride && (
+                <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-black leading-none">
+                  {overrideCount}
+                </span>
+              )}
+            </button>
           </div>
         </div>
 
@@ -600,224 +618,269 @@ export default function AdvancedDashboard() {
           </div>
         </div>
 
-        {/* BẢNG ĐIỀU KHIỂN & ĐÈ THÔNG SỐ TOÀN DIỆN (THEO WEB HOẶC CẢM BIẾN TỰ ĐO) */}
-        <div className={`${neuCard} flex flex-col gap-5 border border-blue-200/60 bg-gradient-to-r from-blue-50/50 via-[#f4f7fb] to-indigo-50/50`}>
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-600 shadow-inner">
-                <SlidersHorizontal size={22} />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="text-base font-black text-slate-800 uppercase tracking-wide">
-                    Tùy chỉnh thông số hệ thống
-                  </h3>
-                  <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${
-                    hasAnyOverride 
-                      ? "bg-amber-100 text-amber-700 border border-amber-300" 
-                      : "bg-emerald-100 text-emerald-700 border border-emerald-300"
-                  }`}>
-                    {hasAnyOverride ? `Đang tùy chỉnh ${overrideCount}/7 thông số` : "Tất cả thông số đang tự đo"}
-                  </span>
-                </div>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Nhập giá trị để trạm & web chạy theo số web. Để trống hoặc chọn &quot;Cảm biến tự đo&quot; để chạy theo cảm biến thực tế.
-                </p>
-              </div>
-            </div>
+        {/* NÚT BÁNH RĂNG CỐ ĐỊNH (FAB) ĐỂ MỞ BẢNG TÙY CHỈNH THÔNG SỐ */}
+        <button
+          type="button"
+          onClick={() => setIsSettingsOpen(true)}
+          className="fixed bottom-6 right-6 z-40 flex items-center gap-2.5 px-4 py-3 sm:px-5 sm:py-3.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-full shadow-2xl transition-all duration-200 cursor-pointer group"
+          title="Tùy chỉnh thông số hệ thống"
+        >
+          <Settings size={22} className="group-hover:rotate-90 transition-transform duration-300" />
+          <span className="text-xs font-bold tracking-wide">Tùy chỉnh thông số</span>
+          {hasAnyOverride && (
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-400 text-slate-900 text-[10px] font-black shadow">
+              {overrideCount}
+            </span>
+          )}
+        </button>
 
-            <div className="flex items-center gap-2 self-end md:self-auto">
-              {hasAnyOverride && (
-                <button
-                  type="button"
-                  onClick={handleResetAllToAuto}
-                  disabled={isSubmittingManual}
-                  className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-200 hover:bg-slate-300 active:scale-95 text-slate-700 text-xs font-bold rounded-xl shadow transition-all duration-150 disabled:opacity-50 cursor-pointer"
-                >
-                  <RotateCcw size={14} /> Đặt lại tất cả về tự đo
-                </button>
-              )}
+        {/* MODAL BẢNG ĐIỀU KHIỂN & ĐÈ THÔNG SỐ TOÀN DIỆN */}
+        {isSettingsOpen && (
+          <div 
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto animate-in fade-in duration-200"
+            onClick={() => setIsSettingsOpen(false)}
+          >
+            <div 
+              className="relative w-full max-w-4xl bg-[#f4f7fb] rounded-3xl shadow-2xl border border-white/90 p-6 sm:p-8 space-y-6 max-h-[92vh] overflow-y-auto my-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-4 border-b border-slate-200/80">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-600 shadow-inner">
+                    <SlidersHorizontal size={22} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-black text-slate-800 uppercase tracking-wide">
+                        Tùy chỉnh thông số hệ thống
+                      </h3>
+                      <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${
+                        hasAnyOverride 
+                          ? "bg-amber-100 text-amber-700 border border-amber-300" 
+                          : "bg-emerald-100 text-emerald-700 border border-emerald-300"
+                      }`}>
+                        {hasAnyOverride ? `Đang tùy chỉnh ${overrideCount}/7 thông số` : "Tất cả thông số đang tự đo"}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Nhập giá trị để trạm & web chạy theo số web. Để trống hoặc chọn &quot;Cảm biến tự đo&quot; để chạy theo cảm biến thực tế.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 self-end md:self-auto">
+                  {hasAnyOverride && (
+                    <button
+                      type="button"
+                      onClick={handleResetAllToAuto}
+                      disabled={isSubmittingManual}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-200 hover:bg-slate-300 active:scale-95 text-slate-700 text-xs font-bold rounded-xl shadow transition-all duration-150 disabled:opacity-50 cursor-pointer"
+                    >
+                      <RotateCcw size={14} /> Tự đo tất cả
+                    </button>
+                  )}
+                  {/* Nút X để ẩn bảng */}
+                  <button
+                    type="button"
+                    onClick={() => setIsSettingsOpen(false)}
+                    className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-200/70 rounded-xl transition-all cursor-pointer"
+                    title="Ẩn bảng tùy chỉnh"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+              </div>
+
+              <form onSubmit={handleApplyOverrides} className="flex flex-col gap-5">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3.5">
+                  {/* 1. Mực nước / Độ lụt */}
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
+                      <span>Mực nước</span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${overrides.water_level_cm !== null ? "bg-amber-200 text-amber-800" : "text-slate-400"}`}>
+                        {overrides.water_level_cm !== null ? "Theo Web" : "Tự đo"}
+                      </span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        max="100"
+                        value={inputValues.water_level_cm}
+                        onChange={(e) => setInputValues(prev => ({ ...prev, water_level_cm: e.target.value }))}
+                        placeholder="Tự đo"
+                        className="w-full px-2.5 py-2 text-xs font-bold bg-white rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner text-slate-800 pr-7"
+                      />
+                      <span className="absolute right-2 top-2 text-[10px] font-bold text-slate-400">cm</span>
+                    </div>
+                  </div>
+
+                  {/* 2. Nhiệt độ */}
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
+                      <span>Nhiệt độ</span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${overrides.temperature !== null ? "bg-amber-200 text-amber-800" : "text-slate-400"}`}>
+                        {overrides.temperature !== null ? "Theo Web" : "Tự đo"}
+                      </span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="-40"
+                        max="80"
+                        value={inputValues.temperature}
+                        onChange={(e) => setInputValues(prev => ({ ...prev, temperature: e.target.value }))}
+                        placeholder="Tự đo"
+                        className="w-full px-2.5 py-2 text-xs font-bold bg-white rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner text-slate-800 pr-7"
+                      />
+                      <span className="absolute right-2 top-2 text-[10px] font-bold text-slate-400">°C</span>
+                    </div>
+                  </div>
+
+                  {/* 3. Độ ẩm */}
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
+                      <span>Độ ẩm</span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${overrides.humidity !== null ? "bg-amber-200 text-amber-800" : "text-slate-400"}`}>
+                        {overrides.humidity !== null ? "Theo Web" : "Tự đo"}
+                      </span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        step="1"
+                        min="0"
+                        max="100"
+                        value={inputValues.humidity}
+                        onChange={(e) => setInputValues(prev => ({ ...prev, humidity: e.target.value }))}
+                        placeholder="Tự đo"
+                        className="w-full px-2.5 py-2 text-xs font-bold bg-white rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner text-slate-800 pr-7"
+                      />
+                      <span className="absolute right-2 top-2 text-[10px] font-bold text-slate-400">%</span>
+                    </div>
+                  </div>
+
+                  {/* 4. Sức gió */}
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
+                      <span>Sức gió</span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${overrides.wind_speed_ms !== null ? "bg-amber-200 text-amber-800" : "text-slate-400"}`}>
+                        {overrides.wind_speed_ms !== null ? "Theo Web" : "Tự đo"}
+                      </span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        max="50"
+                        value={inputValues.wind_speed_ms}
+                        onChange={(e) => setInputValues(prev => ({ ...prev, wind_speed_ms: e.target.value }))}
+                        placeholder="Tự đo"
+                        className="w-full px-2.5 py-2 text-xs font-bold bg-white rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner text-slate-800 pr-8"
+                      />
+                      <span className="absolute right-2 top-2 text-[10px] font-bold text-slate-400">m/s</span>
+                    </div>
+                  </div>
+
+                  {/* 5. Áp suất */}
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
+                      <span>Áp suất</span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${overrides.pressure !== null ? "bg-amber-200 text-amber-800" : "text-slate-400"}`}>
+                        {overrides.pressure !== null ? "Theo Web" : "Tự đo"}
+                      </span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        step="1"
+                        min="800"
+                        max="1200"
+                        value={inputValues.pressure}
+                        onChange={(e) => setInputValues(prev => ({ ...prev, pressure: e.target.value }))}
+                        placeholder="Tự đo"
+                        className="w-full px-2.5 py-2 text-xs font-bold bg-white rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner text-slate-800 pr-8"
+                      />
+                      <span className="absolute right-2 top-2 text-[10px] font-bold text-slate-400">hPa</span>
+                    </div>
+                  </div>
+
+                  {/* 6. Ánh sáng */}
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
+                      <span>Ánh sáng</span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${overrides.light_lux !== null ? "bg-amber-200 text-amber-800" : "text-slate-400"}`}>
+                        {overrides.light_lux !== null ? "Theo Web" : "Tự đo"}
+                      </span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        step="10"
+                        min="0"
+                        max="100000"
+                        value={inputValues.light_lux}
+                        onChange={(e) => setInputValues(prev => ({ ...prev, light_lux: e.target.value }))}
+                        placeholder="Tự đo"
+                        className="w-full px-2.5 py-2 text-xs font-bold bg-white rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner text-slate-800 pr-7"
+                      />
+                      <span className="absolute right-2 top-2 text-[10px] font-bold text-slate-400">lx</span>
+                    </div>
+                  </div>
+
+                  {/* 7. Lượng mưa */}
+                  <div className="flex flex-col gap-1 col-span-2 sm:col-span-1">
+                    <label className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
+                      <span>Mưa</span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${overrides.rain_status !== "auto" ? "bg-amber-200 text-amber-800" : "text-slate-400"}`}>
+                        {overrides.rain_status !== "auto" ? "Theo Web" : "Tự đo"}
+                      </span>
+                    </label>
+                    <select
+                      value={inputValues.rain_status}
+                      onChange={(e) => setInputValues(prev => ({ ...prev, rain_status: e.target.value as "auto" | "rain" | "no_rain" }))}
+                      className="w-full px-2 py-2 text-xs font-bold bg-white rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner text-slate-800"
+                    >
+                      <option value="auto">Cảm biến tự đo</option>
+                      <option value="rain">Đang mưa (Đè)</option>
+                      <option value="no_rain">Tạnh ráo (Đè)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {manualStatusMsg && (
+                  <p className="text-xs font-bold text-center text-blue-600 bg-blue-50 py-2.5 rounded-xl border border-blue-200">
+                    {manualStatusMsg}
+                  </p>
+                )}
+
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-200/80">
+                  <span className="text-xs text-slate-500 text-center sm:text-left">
+                    Mẹo: Xóa trống ô của thông số nào thì thông số đó sẽ lập tức chuyển về tự đo bằng cảm biến thật.
+                  </span>
+                  <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setIsSettingsOpen(false)}
+                      className="px-4 py-2.5 bg-slate-200 hover:bg-slate-300 active:scale-95 text-slate-700 text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer"
+                    >
+                      Ẩn bảng
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSubmittingManual}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-bold rounded-xl shadow-md transition-all duration-150 disabled:opacity-50 cursor-pointer justify-center"
+                    >
+                      <Check size={16} /> {isSubmittingManual ? "Đang gửi..." : "Áp dụng cấu hình"}
+                    </button>
+                  </div>
+                </div>
+              </form>
             </div>
           </div>
-
-          <form onSubmit={handleApplyOverrides} className="flex flex-col gap-4">
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
-              {/* 1. Mực nước / Độ lụt */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
-                  <span>Mực nước</span>
-                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${overrides.water_level_cm !== null ? "bg-amber-200 text-amber-800" : "text-slate-400"}`}>
-                    {overrides.water_level_cm !== null ? "Theo Web" : "Tự đo"}
-                  </span>
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    max="100"
-                    value={inputValues.water_level_cm}
-                    onChange={(e) => setInputValues(prev => ({ ...prev, water_level_cm: e.target.value }))}
-                    placeholder="Tự đo"
-                    className="w-full px-2.5 py-2 text-xs font-bold bg-white rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner text-slate-800 pr-7"
-                  />
-                  <span className="absolute right-2 top-2 text-[10px] font-bold text-slate-400">cm</span>
-                </div>
-              </div>
-
-              {/* 2. Nhiệt độ */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
-                  <span>Nhiệt độ</span>
-                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${overrides.temperature !== null ? "bg-amber-200 text-amber-800" : "text-slate-400"}`}>
-                    {overrides.temperature !== null ? "Theo Web" : "Tự đo"}
-                  </span>
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="-40"
-                    max="80"
-                    value={inputValues.temperature}
-                    onChange={(e) => setInputValues(prev => ({ ...prev, temperature: e.target.value }))}
-                    placeholder="Tự đo"
-                    className="w-full px-2.5 py-2 text-xs font-bold bg-white rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner text-slate-800 pr-7"
-                  />
-                  <span className="absolute right-2 top-2 text-[10px] font-bold text-slate-400">°C</span>
-                </div>
-              </div>
-
-              {/* 3. Độ ẩm */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
-                  <span>Độ ẩm</span>
-                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${overrides.humidity !== null ? "bg-amber-200 text-amber-800" : "text-slate-400"}`}>
-                    {overrides.humidity !== null ? "Theo Web" : "Tự đo"}
-                  </span>
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    step="1"
-                    min="0"
-                    max="100"
-                    value={inputValues.humidity}
-                    onChange={(e) => setInputValues(prev => ({ ...prev, humidity: e.target.value }))}
-                    placeholder="Tự đo"
-                    className="w-full px-2.5 py-2 text-xs font-bold bg-white rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner text-slate-800 pr-7"
-                  />
-                  <span className="absolute right-2 top-2 text-[10px] font-bold text-slate-400">%</span>
-                </div>
-              </div>
-
-              {/* 4. Sức gió */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
-                  <span>Sức gió</span>
-                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${overrides.wind_speed_ms !== null ? "bg-amber-200 text-amber-800" : "text-slate-400"}`}>
-                    {overrides.wind_speed_ms !== null ? "Theo Web" : "Tự đo"}
-                  </span>
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    max="50"
-                    value={inputValues.wind_speed_ms}
-                    onChange={(e) => setInputValues(prev => ({ ...prev, wind_speed_ms: e.target.value }))}
-                    placeholder="Tự đo"
-                    className="w-full px-2.5 py-2 text-xs font-bold bg-white rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner text-slate-800 pr-8"
-                  />
-                  <span className="absolute right-2 top-2 text-[10px] font-bold text-slate-400">m/s</span>
-                </div>
-              </div>
-
-              {/* 5. Áp suất */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
-                  <span>Áp suất</span>
-                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${overrides.pressure !== null ? "bg-amber-200 text-amber-800" : "text-slate-400"}`}>
-                    {overrides.pressure !== null ? "Theo Web" : "Tự đo"}
-                  </span>
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    step="1"
-                    min="800"
-                    max="1200"
-                    value={inputValues.pressure}
-                    onChange={(e) => setInputValues(prev => ({ ...prev, pressure: e.target.value }))}
-                    placeholder="Tự đo"
-                    className="w-full px-2.5 py-2 text-xs font-bold bg-white rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner text-slate-800 pr-8"
-                  />
-                  <span className="absolute right-2 top-2 text-[10px] font-bold text-slate-400">hPa</span>
-                </div>
-              </div>
-
-              {/* 6. Ánh sáng */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
-                  <span>Ánh sáng</span>
-                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${overrides.light_lux !== null ? "bg-amber-200 text-amber-800" : "text-slate-400"}`}>
-                    {overrides.light_lux !== null ? "Theo Web" : "Tự đo"}
-                  </span>
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    step="10"
-                    min="0"
-                    max="100000"
-                    value={inputValues.light_lux}
-                    onChange={(e) => setInputValues(prev => ({ ...prev, light_lux: e.target.value }))}
-                    placeholder="Tự đo"
-                    className="w-full px-2.5 py-2 text-xs font-bold bg-white rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner text-slate-800 pr-7"
-                  />
-                  <span className="absolute right-2 top-2 text-[10px] font-bold text-slate-400">lx</span>
-                </div>
-              </div>
-
-              {/* 7. Lượng mưa */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
-                  <span>Mưa</span>
-                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${overrides.rain_status !== "auto" ? "bg-amber-200 text-amber-800" : "text-slate-400"}`}>
-                    {overrides.rain_status !== "auto" ? "Theo Web" : "Tự đo"}
-                  </span>
-                </label>
-                <select
-                  value={inputValues.rain_status}
-                  onChange={(e) => setInputValues(prev => ({ ...prev, rain_status: e.target.value as "auto" | "rain" | "no_rain" }))}
-                  className="w-full px-2 py-2 text-xs font-bold bg-white rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner text-slate-800"
-                >
-                  <option value="auto">Cảm biến tự đo</option>
-                  <option value="rain">Đang mưa (Đè)</option>
-                  <option value="no_rain">Tạnh ráo (Đè)</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-slate-200/60">
-              <span className="text-xs text-slate-500">
-                Mẹo: Xóa trống ô của thông số nào thì thông số đó sẽ lập tức chuyển về tự đo bằng cảm biến thật.
-              </span>
-              <button
-                type="submit"
-                disabled={isSubmittingManual}
-                className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-bold rounded-xl shadow-md transition-all duration-150 disabled:opacity-50 cursor-pointer self-stretch sm:self-auto justify-center"
-              >
-                <Check size={16} /> {isSubmittingManual ? "Đang gửi..." : "Áp dụng cấu hình"}
-              </button>
-            </div>
-          </form>
-        </div>
-        {manualStatusMsg && (
-          <p className="text-xs font-semibold text-center text-blue-600 -mt-4">
-            {manualStatusMsg}
-          </p>
         )}
 
       </div>
