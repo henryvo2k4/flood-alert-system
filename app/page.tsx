@@ -8,7 +8,7 @@ import {
   ComposedChart, Bar, Area, Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis
 } from "recharts";
 import { 
-  Droplets, Wind, Thermometer, CloudRain, Activity, AlertCircle, MapPin, SlidersHorizontal, RotateCcw, Check, Settings, X
+  Droplets, Wind, Thermometer, CloudRain, Activity, AlertCircle, MapPin, SlidersHorizontal, RotateCcw, Check, Settings, X, RefreshCw
 } from "lucide-react";
 
 // Tải Component bản đồ động (Bỏ qua SSR)
@@ -83,6 +83,14 @@ export default function AdvancedDashboard() {
   const [manualStatusMsg, setManualStatusMsg] = useState<string>("");
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
 
+  // States vị trí thực tế của thiết bị trạm quan trắc trên bản đồ
+  const [deviceLocation, setDeviceLocation] = useState<{ lat: number; lng: number }>({
+    lat: 10.7684512638001,
+    lng: 106.706217892206,
+  });
+  const [isLocating, setIsLocating] = useState<boolean>(false);
+  const [locationStatusMsg, setLocationStatusMsg] = useState<string>("");
+
   const formatTimestampLabel = (label: unknown) => {
     const raw = typeof label === "string" || typeof label === "number" || label instanceof Date
       ? label
@@ -139,7 +147,98 @@ export default function AdvancedDashboard() {
       });
     }
 
+    // 3. Lấy tọa độ trạm quan trắc từ bảng stations hoặc localStorage
+    if (typeof window !== "undefined") {
+      try {
+        const savedLoc = localStorage.getItem("flood_station_location");
+        if (savedLoc) {
+          const parsed = JSON.parse(savedLoc);
+          if (typeof parsed.lat === "number" && typeof parsed.lng === "number") {
+            setDeviceLocation({ lat: parsed.lat, lng: parsed.lng });
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    const { data: stationData } = await supabase
+      .from("stations")
+      .select("lat, lng")
+      .eq("id", STATION_ID)
+      .single();
+
+    if (stationData && typeof stationData.lat === "number" && typeof stationData.lng === "number") {
+      if (typeof window !== "undefined" && !localStorage.getItem("flood_station_location")) {
+        setDeviceLocation({ lat: stationData.lat, lng: stationData.lng });
+      }
+    }
+
     setLoading(false);
+  }, []);
+
+  // Hàm làm mới và cập nhật vị trí thiết bị trạm quan trắc
+  const handleRefreshLocation = useCallback(() => {
+    if (typeof window === "undefined" || !navigator.geolocation) {
+      setLocationStatusMsg("Trình duyệt không hỗ trợ Geolocation GPS.");
+      setTimeout(() => setLocationStatusMsg(""), 4000);
+      return;
+    }
+
+    setIsLocating(true);
+    setLocationStatusMsg("Đang lấy tọa độ GPS từ thiết bị...");
+
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        setDeviceLocation({ lat, lng });
+
+        if (typeof window !== "undefined") {
+          try {
+            localStorage.setItem("flood_station_location", JSON.stringify({ lat, lng }));
+          } catch {
+            // ignore
+          }
+        }
+
+        try {
+          await supabase.from("stations").update({ lat, lng }).eq("id", STATION_ID);
+        } catch {
+          // ignore
+        }
+
+        setIsLocating(false);
+        setLocationStatusMsg(`Đã cập nhật vị trí thiết bị (${lat.toFixed(4)}, ${lng.toFixed(4)})`);
+        setTimeout(() => setLocationStatusMsg(""), 5000);
+      },
+      async (err) => {
+        console.warn("Geolocation error:", err.message);
+        try {
+          const { data: stationData } = await supabase
+            .from("stations")
+            .select("lat, lng")
+            .eq("id", STATION_ID)
+            .single();
+
+          if (stationData && typeof stationData.lat === "number" && typeof stationData.lng === "number") {
+            setDeviceLocation({ lat: stationData.lat, lng: stationData.lng });
+            setLocationStatusMsg(`Đã tải tọa độ lưu trạm (${stationData.lat.toFixed(4)}, ${stationData.lng.toFixed(4)})`);
+          } else {
+            setLocationStatusMsg("Không thể lấy vị trí. Vui lòng cho phép quyền truy cập vị trí trên trình duyệt.");
+          }
+        } catch {
+          setLocationStatusMsg("Không thể xác định vị trí. Vui lòng bật GPS trình duyệt.");
+        }
+        setIsLocating(false);
+        setTimeout(() => setLocationStatusMsg(""), 6000);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      }
+    );
   }, []);
 
   useEffect(() => {
@@ -607,14 +706,36 @@ export default function AdvancedDashboard() {
 
         {/* MAP SECTION */}
         <div className={`${neuCard} flex flex-col h-112.5`}>
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-sm font-bold text-slate-700 flex items-center gap-2">
-              <MapPin size={18} className="text-blue-500" /> VỊ TRÍ TRẠM QUAN TRẮC THỰC TẾ
-            </h2>
-            <span className="text-xs font-medium text-slate-400">Cập nhật theo thời gian thực</span>
+          <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                <MapPin size={18} className="text-blue-500" /> VỊ TRÍ TRẠM QUAN TRẮC THỰC TẾ
+              </h2>
+              <span className="text-[11px] font-mono text-slate-500 bg-slate-200/70 px-2 py-0.5 rounded-md hidden sm:inline">
+                {deviceLocation.lat.toFixed(5)}, {deviceLocation.lng.toFixed(5)}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {locationStatusMsg && (
+                <span className="text-[11px] font-semibold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
+                  {locationStatusMsg}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={handleRefreshLocation}
+                disabled={isLocating}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 bg-white hover:bg-blue-50 hover:text-blue-600 border border-slate-200 rounded-xl shadow-xs transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+                title="Làm mới vị trí bản đồ theo tọa độ thiết bị"
+              >
+                <RefreshCw size={13} className={isLocating ? "animate-spin text-blue-600" : "text-slate-500"} />
+                <span>{isLocating ? "Đang định vị..." : "Làm mới vị trí"}</span>
+              </button>
+            </div>
           </div>
           <div className="w-full flex-1 rounded-xl overflow-hidden shadow-inner border border-slate-200">
-            <MapNode isFlooded={isFlooded} isStormy={isStormy} />
+            <MapNode lat={deviceLocation.lat} lng={deviceLocation.lng} isFlooded={isFlooded} isStormy={isStormy} />
           </div>
         </div>
 

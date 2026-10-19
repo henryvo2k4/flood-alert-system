@@ -1,6 +1,7 @@
 "use client";
 
-import { MapContainer, TileLayer, Marker, Popup, Circle } from 'react-leaflet';
+import { useEffect } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -25,7 +26,31 @@ const createStatusIcon = (statusColor: string) =>
     popupAnchor: [0, -18],
   });
 
-export default function MapNode({ lat = 10.779393260402657, lng = 106.6801167937429, isFlooded = false, isStormy = false }) {
+// Component điều khiển pan/flyTo khi tọa độ thay đổi
+function ChangeView({ center }: { center: [number, number] }) {
+  const map = useMap();
+  useEffect(() => {
+    map.flyTo(center, map.getZoom() || 15, {
+      duration: 1.2,
+      easeLinearity: 0.25,
+    });
+  }, [center, map]);
+  return null;
+}
+
+interface MapNodeProps {
+  lat?: number;
+  lng?: number;
+  isFlooded?: boolean;
+  isStormy?: boolean;
+}
+
+export default function MapNode({ 
+  lat = 10.7684512638001, 
+  lng = 106.706217892206, 
+  isFlooded = false, 
+  isStormy = false 
+}: MapNodeProps) {
   const statusColor = isFlooded ? '#ef4444' : isStormy ? '#f97316' : '#10b981';
   const statusText = isFlooded ? 'Ngập úng khẩn cấp' : isStormy ? 'Cảnh báo mưa bão' : 'An toàn';
   const markerIcon = createStatusIcon(statusColor);
@@ -37,6 +62,7 @@ export default function MapNode({ lat = 10.779393260402657, lng = 106.6801167937
       scrollWheelZoom={false}
       style={{ height: '100%', width: '100%', borderRadius: '1rem', zIndex: 0 }}
     >
+      <ChangeView center={[lat, lng]} />
       <TileLayer
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
@@ -44,9 +70,16 @@ export default function MapNode({ lat = 10.779393260402657, lng = 106.6801167937
       />
       <Marker position={[lat, lng]} icon={markerIcon}>
         <Popup>
-          <div className="font-sans">
-            <strong className="text-slate-800">Trạm Quan Trắc Trung Tâm</strong><br />
-            <span className="text-slate-500">Trạng thái: <span style={{ color: statusColor, fontWeight: 'bold' }}>{statusText}</span></span>
+          <div className="font-sans text-xs space-y-1">
+            <strong className="text-slate-800 text-sm">Vị Trí Thiết Bị Trạm Quan Trắc</strong>
+            <div>
+              <span className="text-slate-500">Tọa độ: </span>
+              <span className="font-mono font-bold text-slate-700">{lat.toFixed(5)}, {lng.toFixed(5)}</span>
+            </div>
+            <div>
+              <span className="text-slate-500">Trạng thái: </span>
+              <span style={{ color: statusColor, fontWeight: 'bold' }}>{statusText}</span>
+            </div>
           </div>
         </Popup>
       </Marker>
